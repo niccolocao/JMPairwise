@@ -1,68 +1,13 @@
+#####################################################
+##############                         ############## 
+############# Code ordinal + continuous #############
+##############                         ##############
+#####################################################
+
 library(dplyr)
 library(MASS)
 library(GLMMadaptive)
 
-dataknee <- readRDS("dat2_with_hosp30g.rds")
-
-itemnames <- c("Mobility","SelfCare","UsualActivities","PainorDiscomfort","Anxietyordepression",
-               "Gettingoutofbed","Puttingonsocks","Gettingupfromsitting",
-               "Bendingtowardthefloor_pickinguponobjectfromtheground",
-               "Twisting_pivotingontheinjuredknee","Kneeling","Squatting")
-
-dataknee[itemnames] <- data.frame(lapply(dataknee[itemnames], as.ordered))
-
-dataknee$ID <- factor(dataknee$ID)
-dataknee$sex01 <- as.integer(dataknee$sex == "M")
-dataknee$prost_uni <- as.integer(dataknee$prosthesis_type == "unicompartimental")
-dataknee$diag_oa <- as.integer(dataknee$diagnosis != "osteoarthritis_knee")
-
-
-dat2 <- dat2[dat2$residence == "Emilia-Romagna", ]
-
-dat2 <- dataknee %>%
-  group_by(ID) %>%
-  arrange(times, .by_group = TRUE) %>%
-  mutate(
-    t_within = times - first(times),
-    visit_idx = row_number() - 1L,
-    post = as.integer(visit_idx >= 1L),
-    time_post = ifelse(post == 1L, t_within, 0),
-    loghosp = log(1 + hospitalizationdays),
-    waiting = as.numeric(difftime(date_intervention, date_baseline, units = "days"))/30.4375,
-    time_discrete = factor(visit_idx, levels = c(0,1,2), labels = c("t0","t6","t12")),
-    I0 = as.integer(time_discrete == "t0"),
-    I6 = as.integer(time_discrete == "t6"),
-    I12 = as.integer(time_discrete == "t12"),
-    Ipost = I6 + I12,
-    loghosp_post = loghosp * Ipost
-  ) %>%
-  ungroup()
-
-
-age_by_id <- dat2 %>%
-  distinct(ID, age) %>%
-  mutate(age_sc = as.numeric(scale(age)))
-
-dat2 <- dat2 %>%
-  select(-age) %>%
-  left_join(age_by_id, by = "ID") %>%
-  rename(age = age_sc)
-  
-event_by_id <- dat2 %>%
-  transmute(ID, t_event_days = as.numeric(difftime(date_revision, date_intervention, units="days"))) %>%
-  mutate(t_event_days = ifelse(is.na(t_event_days) | t_event_days < 0, Inf, t_event_days)) %>%
-  group_by(ID) %>%
-  summarise(T_event_days = min(t_event_days), .groups="drop")
-
-dat2 <- dat2 %>%
-  dplyr::left_join(event_by_id, by="ID") %>%
-  dplyr::filter(
-    visit_idx == 0L |
-      is.infinite(T_event_days) |
-      (visit_idx == 1L & T_event_days > 6*30.4375) |
-      (visit_idx == 2L & T_event_days > 12*30.4375)
-  ) %>%
-  dplyr::select(-T_event_days)
 
 
 make_pair_data_ord_norm_code <- function(dat2, ord_item, cont_item, scale100 = TRUE, eps_y = 0) {
@@ -138,7 +83,7 @@ biv_probit_plus_gaussian_rho <- function(K_ord, cont_shift = K_ord + 1, link = "
     mu2 <- mu_fun(eta_zi)
 
     n_th <- K_ord - 1L
-    if (length(phis) != (n_th + 2L)) stop(sprintf("length(phis) deve essere %d.", n_th + 2L))
+    if (length(phis) != (n_th + 2L)) stop(sprintf("length(phis) must be %d.", n_th + 2L))
 
     zeta <- phis[seq_len(n_th)]
     logsigma <- phis[n_th + 1L]
@@ -171,7 +116,7 @@ biv_probit_plus_gaussian_rho <- function(K_ord, cont_shift = K_ord + 1, link = "
       if (any(is_ord)) {
         idx <- idx_ok[is_ord]
         ycat <- as.integer(round(yy[is_ord]))
-        if (any(ycat < 1L | ycat > K_ord)) stop("ordinale fuori range.")
+        if (any(ycat < 1L | ycat > K_ord)) stop("ordinal not in range.")
 
         theta_u <- ifelse(ycat < K_ord, zeta[ycat],  Inf)
         theta_l <- ifelse(ycat > 1L,    zeta[ycat - 1L], -Inf)
@@ -196,7 +141,7 @@ biv_probit_plus_gaussian_rho <- function(K_ord, cont_shift = K_ord + 1, link = "
         ycont <- tmp - k
         k <- as.integer(k)
 
-        if (any(k < 1L | k > K_ord)) stop("k fuori range nel caso both.")
+        if (any(k < 1L | k > K_ord)) stop("k out of range.")
         ycont <- pmin(pmax(ycont, 0), 1 - 1e-12)
 
         v <- (ycont - et2[idx]) / sigma
@@ -496,32 +441,25 @@ itemnamesKOOS <- c('Gettingoutofbed','Puttingonsocks','Gettingupfromsitting',
                    'Twisting_pivotingontheinjuredknee','Kneeling','Squatting')
 itemnames <- c(itemnamesEQ, itemnamesKOOS)
 
-# res <- fit_all_ord_norm_parallel(
-#   dat2,
-#   ord_items = itemnames,
-#   cont_items = "Perceivedcurrenthealthstatus",
-#   ctrl = list(iter_EM = 0, nAGQ = 11, verbose = FALSE),
-#   out_dir = "pairwise_VAS_vs_ord_norm_resid",
+res <- fit_all_ord_norm_parallel(
+  dat2,
+  ord_items = itemnames,
+  cont_items = "Perceivedcurrenthealthstatus",
+  ctrl = list(iter_EM = 0, nAGQ = 11, verbose = FALSE),
+  out_dir = "pairwise_VAS_vs_ord_norm_resid",
+  resume = TRUE,
+  n_cores = 12,
+  print_names = TRUE,
+  fit_verbose_to_file = TRUE
+)
 
-#   resume = TRUE,
-#   n_cores = 1,
-#   print_names = TRUE,
-#   fit_verbose_to_file = TRUE
+
+# one pair
+# res <- fit_one_pair_ord_norm_cor(
+#  dat2,
+#  ord_item  = "Twisting_pivotingontheinjuredknee",
+#  cont_item = "Perceivedcurrenthealthstatus",
+#  ctrl      = list(iter_EM = 0, nAGQ = 12, verbose = TRUE)
 # )
 
-
-# #test singolo
-res <- fit_one_pair_ord_norm_cor(
-  dat2,
-  ord_item  = "Twisting_pivotingontheinjuredknee",
-  cont_item = "Perceivedcurrenthealthstatus",
-  ctrl      = list(iter_EM = 0, nAGQ = 12, verbose = TRUE)
-)
-saveRDS(res,"/home/niccolo.cao/pairfit/pairwise_VAS_vs_ord_norm_resid/010_Twisting_pivotingontheinjuredknee__Perceivedcurrenthealthstatus.rds")
-# res$rho_resid
-# res$sigma
-# summary(res$fit)
-# res$rho_resid
-# res$sigma
-# summary(res$fit)
 
