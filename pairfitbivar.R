@@ -771,22 +771,22 @@ itemnamesKOOS <- c('Gettingoutofbed','Puttingonsocks','Gettingupfromsitting',
                    'Twisting_pivotingontheinjuredknee','Kneeling','Squatting')
 itemnames <- c(itemnamesEQ, itemnamesKOOS)
 
-# res_pairs <- fit_all_pairs_parallel(
-#   dat2, itemnames,
-#   ctrl = list(iter_EM = 0, nAGQ = 11),
-#   out_dir = "pairwise_EQ_ER_11_bivar",
-#   resume = TRUE,
-#   n_cores = 12,
-#   print_names = TRUE
-# )
-
-
-
-
-model.start <- readRDS("pairwise_EQ_ER_11_for_failures/001_Mobility__SelfCare.rds")
-
-res_biv <- fit_one_pair_biv_cor(
-  dat2,
-  items = c('UsualActivities',"Mobility"),
-  ctrl = list(iter_EM = 0, nAGQ = 4, verbose = TRUE)
+res_pairs <- fit_all_pairs_parallel(
+  dat2, itemnames,
+  ctrl = list(iter_EM = 0, nAGQ = 11),
+  out_dir = "pairwise_EQ_ER_11_bivar",
+  resume = TRUE,
+  n_cores = 12,
+  print_names = TRUE
 )
+
+
+
+##### one pair
+# model.start <- readRDS("pairwise_EQ_ER_11_for_failures/001_Mobility__SelfCare.rds")
+
+# res_biv <- fit_one_pair_biv_cor(
+#  dat2,
+#  items = c('UsualActivities',"Mobility"),
+#  ctrl = list(iter_EM = 0, nAGQ = 4, verbose = TRUE)
+#)
