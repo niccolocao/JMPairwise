@@ -1,5 +1,8 @@
-############################
-####### 2 random intercept per item
+#######################################################
+########                                ###############
+####### Code for a pair of ordinal items ##############
+########                                ###############
+#######################################################
 library(dplyr)
 library(tidyr)
 library(purrr)
@@ -7,7 +10,7 @@ library(tibble)
 library(stringr)
 library(GLMMadaptive)
 library(MASS)
-library(mvtnorm)  ## *** MOD *** per pmvnorm
+library(mvtnorm)  
 library(pbivnorm)
 
 dataknee <- readRDS("dat2_with_hosp30g.rds")
@@ -83,7 +86,7 @@ biv_cumulative_probit_glmmadaptive <- function(K_item_named, link = "identity") 
   K1 <- as.integer(K_item_named[1])
   K2 <- as.integer(K_item_named[2])
 
-  if (K1 < 2L || K2 < 2L) stop("ogni item deve avere almeno 2 categorie.")
+  if (K1 < 2L || K2 < 2L) stop("each item must have at least 2 categories.")
 
   stats <- make.link(link)
   len_th1 <- K1 - 1L
@@ -436,10 +439,10 @@ make_initial_values_biv <- function(dp, items, K_item, start_from = NULL, initia
     out <- modifyList(out, initial_values)
   }
 
-  if (!is.null(out$betas) && length(out$betas) != p) stop("betas deve avere lunghezza 10.")
-  if (!is.null(out$gammas) && length(out$gammas) != p) stop("gammas deve avere lunghezza 10.")
-  if (!is.null(out$D) && (!is.matrix(out$D) || any(dim(out$D) != c(4L, 4L)))) stop("D deve essere 4x4.")
-  if (length(out$phis) != n_phis) stop("phis ha lunghezza sbagliata.")
+  if (!is.null(out$betas) && length(out$betas) != p) stop("betas must be of length 10.")
+  if (!is.null(out$gammas) && length(out$gammas) != p) stop("gammas  must be of length 10.")
+  if (!is.null(out$D) && (!is.matrix(out$D) || any(dim(out$D) != c(4L, 4L)))) stop("D  must be 4x4.")
+  if (length(out$phis) != n_phis) stop("phis has wrong length.")
 
   out
 }
@@ -583,7 +586,7 @@ fit_all_pairs_parallel <- function(dat2, itemnames,
   if (print_names && length(skip_idx)) {
     for (k in skip_idx) {
       items <- pairs[[k]]
-      cat(sprintf("[SKIP] %03d/%03d :: %s vs %s (già presente)\n", k, N, items[1], items[2]))
+      cat(sprintf("[SKIP] %03d/%03d :: %s vs %s (already done)\n", k, N, items[1], items[2]))
     }
     flush.console()
   }
@@ -676,7 +679,7 @@ fit_all_pairs_parallel <- function(dat2, itemnames,
     
   } else {
     if (!requireNamespace("pbapply", quietly = TRUE))
-      stop("Installa 'future.apply' + 'progressr' oppure almeno 'pbapply' per la progress bar.")
+      stop("Instal 'future.apply' + 'progressr' or at least 'pbapply' for progress bar.")
     
     cl <- parallel::makeCluster(min(n_cores, length(todo_idx)))
     on.exit(try(parallel::stopCluster(cl), silent = TRUE), add = TRUE)
@@ -776,17 +779,17 @@ res_pairs <- fit_all_pairs_parallel(
   ctrl = list(iter_EM = 0, nAGQ = 11),
   out_dir = "pairwise_EQ_ER_11_bivar",
   resume = TRUE,
-  n_cores = 12,
+  n_cores = 66,
   print_names = TRUE
 )
 
 
 
-##### one pair
+
 # model.start <- readRDS("pairwise_EQ_ER_11_for_failures/001_Mobility__SelfCare.rds")
 
 # res_biv <- fit_one_pair_biv_cor(
-#  dat2,
-#  items = c('UsualActivities',"Mobility"),
-#  ctrl = list(iter_EM = 0, nAGQ = 4, verbose = TRUE)
-#)
+#   dat2,
+#   items = c("Mobility","SelfCare"),
+#   ctrl = list(iter_EM = 0, nAGQ = 11, verbose = TRUE)
+# )
