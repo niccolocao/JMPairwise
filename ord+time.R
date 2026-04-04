@@ -1,50 +1,18 @@
-## ================================================================
-##  PAIRWISE (ITEM + SURVIVAL)
-## ================================================================
+#####################################################################
+#################                              ######################
+###############  Pair ordinal + time-to-event    ####################
+#################                              ######################
+#####################################################################
+library(dplyr)
+library(tidyr)
+library(tibble)
+library(stringr)
+library(GLMMadaptive)
+library(MASS)
+library(survival)
 
 
 
-
-suppressPackageStartupMessages({
-  library(dplyr); library(tidyr); library(tibble); library(stringr)
-  library(GLMMadaptive); library(MASS); library(survival)
-})
-
-## -- safe save 
-.safe_saveRDS <- function(object, file, compress = "xz") {
-  dir.create(dirname(file), showWarnings = FALSE, recursive = TRUE)
-  tmp <- paste0(file, ".tmp_", sprintf("%06d", sample.int(1e6, 1)))
-  on.exit(try(unlink(tmp), silent = TRUE), add = TRUE)
-  saveRDS(object, tmp, compress = compress)
-  file.rename(tmp, file)
-}
-
-## -- estrazione RE summary per (z1I0, z1Ipost, z2)
-.extract_re_summary_item_surv <- function(fit) {
-  V <- tryCatch(VarCorr(fit)$ID, error = function(e) NULL)
-  if (is.null(V)) V <- tryCatch(fit$D, error = function(e) NULL)
-  if (is.null(V)) {
-    return(list(
-      sds  = c(z1I0 = NA_real_, z1Ipost = NA_real_, z2 = NA_real_),
-      corr = c(item_I0_vs_Ipost = NA_real_, I0_vs_frailty = NA_real_, Ipost_vs_frailty = NA_real_)
-    ))
-  }
-  V <- as.matrix(V); nm <- rownames(V)
-  getc <- function(a,b) if (!(a %in% nm) || !(b %in% nm)) NA_real_ else V[a,b]/sqrt(V[a,a]*V[b,b])
-  sds <- setNames(rep(NA_real_,3), c("z1I0","z1Ipost","z2"))
-  d   <- diag(V); names(d) <- nm
-  present <- intersect(names(sds), names(d)); sds[present] <- sqrt(d[present])
-
-  corr <- c(
-    item_I0_vs_Ipost = getc("z1I0","z1Ipost"),
-    I0_vs_frailty    = getc("z1I0","z2"),
-    Ipost_vs_frailty = getc("z1Ipost","z2")
-  )
-  list(sds = sds, corr = corr)
-}
-
-
-## --- FAMILY INDICIZZATA (usa idx per rileggere type/start/stop/status) ---
 cprobit_weibull_indexed <- function(K, type_vec, start_vec, stop_vec, status_vec, link="identity") {
   stats <- make.link(link); len_th <- K - 1L; eps <- 1e-12
   force(type_vec); force(start_vec); force(stop_vec); force(status_vec)
@@ -62,7 +30,7 @@ cprobit_weibull_indexed <- function(K, type_vec, start_vec, stop_vec, status_vec
     
     type <- type_vec[idx]
     
-    ## ------ ORDINALE ------
+    # ordinal
     io <- which(type == 0L)
     if (length(io)) {
       Ki <- K
@@ -90,7 +58,7 @@ cprobit_weibull_indexed <- function(K, type_vec, start_vec, stop_vec, status_vec
       }
     }
     
-    ## ------ SURVIVAL (Weibull–PH) ------
+    #Weibull PH
     isv <- which(type == 1L)
     if (length(isv)) {
       start <- pmax(start_vec[idx[isv]], 0)
@@ -127,6 +95,40 @@ cprobit_weibull_indexed <- function(K, type_vec, start_vec, stop_vec, status_vec
     log_dens = log_dens
   ), class="family")
 }
+
+
+.safe_saveRDS <- function(object, file, compress = "xz") {
+  dir.create(dirname(file), showWarnings = FALSE, recursive = TRUE)
+  tmp <- paste0(file, ".tmp_", sprintf("%06d", sample.int(1e6, 1)))
+  on.exit(try(unlink(tmp), silent = TRUE), add = TRUE)
+  saveRDS(object, tmp, compress = compress)
+  file.rename(tmp, file)
+}
+
+
+.extract_re_summary_item_surv <- function(fit) {
+  V <- tryCatch(VarCorr(fit)$ID, error = function(e) NULL)
+  if (is.null(V)) V <- tryCatch(fit$D, error = function(e) NULL)
+  if (is.null(V)) {
+    return(list(
+      sds  = c(z1I0 = NA_real_, z1Ipost = NA_real_, z2 = NA_real_),
+      corr = c(item_I0_vs_Ipost = NA_real_, I0_vs_frailty = NA_real_, Ipost_vs_frailty = NA_real_)
+    ))
+  }
+  V <- as.matrix(V); nm <- rownames(V)
+  getc <- function(a,b) if (!(a %in% nm) || !(b %in% nm)) NA_real_ else V[a,b]/sqrt(V[a,a]*V[b,b])
+  sds <- setNames(rep(NA_real_,3), c("z1I0","z1Ipost","z2"))
+  d   <- diag(V); names(d) <- nm
+  present <- intersect(names(sds), names(d)); sds[present] <- sqrt(d[present])
+
+  corr <- c(
+    item_I0_vs_Ipost = getc("z1I0","z1Ipost"),
+    I0_vs_frailty    = getc("z1I0","z2"),
+    Ipost_vs_frailty = getc("z1Ipost","z2")
+  )
+  list(sds = sds, corr = corr)
+}
+
 
                                 
 fit_one_item_surv <- function(item_name,
@@ -410,7 +412,6 @@ long <- long %>%
     colnames(D0s)[3] <- "z2"
     rownames(D0s)[3] <- "z2"
 
-  ## ---------- COPIA 6: fit joint (invariato) ----------
   fit_joint <- mixed_model(
   fixed  = fixed_fml,
   random = random_fml,
@@ -513,7 +514,7 @@ fit_all_items_vs_surv_parallel <- function(itemnames,
 
       .log_line("START %03d :: %s vs SURV", i, item)
 
-      ## FIX 3: source delle defs anche qui
+                        
       if (!is.null(defs_file)) source(defs_file, local = TRUE)
 
       out <- tryCatch({
@@ -642,7 +643,7 @@ itemnames_all <- c('Mobility','SelfCare','UsualActivities','PainorDiscomfort','A
                    'Bendingtowardthefloor_pickinguponobjectfromtheground',
                    'Twisting_pivotingontheinjuredknee','Kneeling','Squatting')
 
-defs_file <- normalizePath("jm_defs.R", mustWork = TRUE)
+defs_file <- normalizePath("univariateFuns.R", mustWork = TRUE)
 res_item_surv <- fit_all_items_vs_surv_parallel(
   itemnames = itemnames_all,
   out_dir   = "pairwise_failure_hospost",
