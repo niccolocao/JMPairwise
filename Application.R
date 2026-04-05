@@ -87,14 +87,8 @@ se_interest <- sqrt(diag(V_interest))
 # reconstruct the random-effects variance-covariance matrix D and the corresponding correlation matrix from psi_global
 outD <- re_varcov_matrix2(psi_global, label_filter = "(_I0|_Ipost|frailty)$")
 
-# Optional correction if D is not symmetric positive definite: negative eigenvalues are truncated to a very small positive number
-eigenvalues <- eigen(outD$D)$values
-eigenvectors <- eigen(outD$D)$vectors
-eigenvalues[eigenvalues < 0] <- 1e-12
-
-Dadj <- eigenvectors %*% diag(eigenvalues) %*% t(eigenvectors)
-rownames(Dadj) <- rownames(outD$D)
-colnames(Dadj) <- colnames(outD$D)
+# Correction if D is not symmetric positive definite
+Dadj <- as.matrix(Matrix::nearPD(outD$D)$mat)
 
 # Define the desired ordering of random effects: baseline effects, post-intervention effects, and frailty.
 itemnames <- c("Mobility", "SelfCare", "UsualActivities", "PainorDiscomfort","Anxietyordepression", "Gettingoutofbed", "Puttingonsocks",
@@ -108,8 +102,23 @@ Dadj <- Dadj[ordD, ordD]
 Corradj <- cov2cor(Dadj)
 
 # Update transformed estimates so that sd_* and corr_* are consistent with the corrected positive-definite D matrix
-est_interest_adj <- update_est_interest_from_D(
-  est_interest, Dadj, Corradj, representation = "corr"
+est_interest_adj <- update_est_interest_from_D(est_interest, Dadj, Corradj, representation = "corr")
+
+#residual correlations
+R_resid_raw <- corr_resid_matrix_simple(est_interest_adj, base = "corr_resid", sep = "__")
+R_resid_adj <- as.matrix(Matrix::nearPD(R_resid_raw, corr = TRUE)$mat)
+rownames(R_resid_adj) <- rownames(R_resid_raw)
+colnames(R_resid_adj) <- colnames(R_resid_raw)
+
+est_interest_adj <- update_corr_est_from_matrix(est_interest_adj, R_resid_adj, prefix = "corr_resid__")
+
+#table for correlations with  fisher z + fdr
+tab_corr_fdr <- make_corr_table_fisher_fdr(
+  est = est_interest_adj,
+  se = se_interest,
+  family = "all",
+  alpha = 0.05,
+  fdr_method = "fdr"
 )
 
 # Build a final vector/covariance object that keeps:
@@ -140,14 +149,16 @@ psi_adj_cov <- update_est_interest_from_D(
 
 
 ######### Table for all fixed effects (longitudinal submodel ############################################
-
+.default_base_order <- c(
+  "Mobility", "SelfCare", "UsualActivities", "PainorDiscomfort", "Anxietyordepression","Perceivedcurrenthealthstatus",
+  "Gettingoutofbed", "Puttingonsocks", "Gettingupfromsitting", "Bendingtowardthefloor_pickinguponobjectfromtheground",  "Twisting_pivotingontheinjuredknee",  "Kneeling", "Squatting",
+  "frailty"
+)
 item_order <- setdiff(.default_base_order, "frailty")
 
-tab_items3 <- make_wald_table_3cols(psi = psi_global,se= se_global,alpha = 0.05,
-  predictors = c("I6","I12","wI6","wI12","pI6","pI12","diag_oa","sex01","loghosp_post","age"),
-  item_levels = item_order
-)
-
+tab_items3 <- make_wald_table_3cols_fdr(psi = psi_global,
+  se = se_global, est_corr = est_interest_adj, alpha = 0.05, predictors = c("I6","I12","wI6","wI12","pI6","pI12","diag_oa","sex01","loghosp_post","age"),
+  item_levels = item_order,  include_corr_frailty = TRUE, corr_levels = c("I0","Ipost"),  corr_prefix = "corrFrailty", fdr_method_fixed = "fdr", fdr_method_corr = "fdr")
 
 
 item_map <- c(Mobility = "Mobility", SelfCare = "SelfCare",UsualActivities = "UsualAct", PainorDiscomfort = "PainDisc", Anxietyordepression = "AnxDepr",   
@@ -168,8 +179,9 @@ tab <- wald_table_raw(est_interest_adj, se_interest, add_fdr_corr = TRUE)
 tab_use = tab
 
 # Wald on fisher z for correlations Cor(b_ik1, s_i) and Cor(b_ik2, s_i)
-corr_frail <- est_interest_adj[grepl("frailty", names(est_interest_adj))]
-se_frail   <- se_interest[names(corr_frail)]
+corr_frail_nm <- names(est_interest_adj)[grepl("^corr_", names(est_interest_adj))&grepl("frailty", names(est_interest_adj))]
+corr_frail <- est_interest_adj[corr_frail_nm]
+se_frail   <- se_interest[corr_frail_nm]
 
 tab_fisher <- wald_fisher_from_r(corr_frail, se_frail)
 
@@ -237,10 +249,23 @@ origKOOS <- c('Gettingoutofbed','Puttingonsocks','Gettingupfromsitting','Bending
 short_map_base <- setNames(c(itemnamesEQ, itemnamesKOOS), c(origEQ, origKOOS))
 
 add_abc <- TRUE 
-labs_I0 <- make_labs_time(est_interest, time = "I0", include_frailty = TRUE)
-sd_I0   <- make_sd_vec_for_labs(est_interest, labs_I0)
-RP_I0   <- make_RP_from_tab(tab, labs_I0, p_col = c("p_fisher","p"))
 
+# baseline + frailty
+labs_I0 <- make_labs_time(est_interest_adj, time = "I0", include_frailty = TRUE)
+sd_I0   <- make_sd_vec_for_labs(est_interest_adj, labs_I0)
+
+tmp_I0 <- make_RP_from_tab(
+  tab = tab_corr_fdr,
+  labs = labs_I0,
+  p_col = c("p_fdr","p"),
+  which_corr = "std"
+)
+
+RP_I0 <- list(
+  R = Corradj[labs_I0, labs_I0, drop = FALSE],
+  P = tmp_I0$P,
+  tab_used = tmp_I0$tab_used
+)
 
 I0frail <- plot_corr_circles_lower(
   R = RP_I0$R,
@@ -261,11 +286,22 @@ I0frail <- plot_corr_circles_lower(
   legend_text_size = 9
 )
 
-# --- post + frailty
-labs_Ipost <- make_labs_time(est_interest, time = "Ipost", include_frailty = TRUE)
-sd_Ipost   <- make_sd_vec_for_labs(est_interest, labs_Ipost)
-RP_Ipost   <- make_RP_from_tab(tab, labs_Ipost, p_col = c("p_fisher","p"))
+# post + frailty
+labs_Ipost <- make_labs_time(est_interest_adj, time = "Ipost", include_frailty = TRUE)
+sd_Ipost   <- make_sd_vec_for_labs(est_interest_adj, labs_Ipost)
 
+tmp_Ipost <- make_RP_from_tab(
+  tab = tab_corr_fdr,
+  labs = labs_Ipost,
+  p_col = c("p_fdr","p"),
+  which_corr = "std"
+)
+
+RP_Ipost <- list(
+  R = Corradj[labs_Ipost, labs_Ipost, drop = FALSE],
+  P = tmp_Ipost$P,
+  tab_used = tmp_Ipost$tab_used
+)
 
 Ipostfrail <- plot_corr_circles_lower(
   R = RP_Ipost$R,
@@ -286,11 +322,20 @@ Ipostfrail <- plot_corr_circles_lower(
   legend_text_size = 9
 )
 
+# baseline x post
+rows_I0    <- make_labs_time(est_interest_adj, time = "I0", include_frailty = FALSE)
+cols_Ipost <- make_labs_time(est_interest_adj, time = "Ipost", include_frailty = FALSE)
 
-rows_I0   <- make_labs_time(est_interest, time = "I0",   include_frailty = FALSE)
-cols_Ipost<- make_labs_time(est_interest, time = "Ipost",include_frailty = FALSE)
+cross <- make_cross_RP_from_tab(
+  tab = tab_corr_fdr,
+  rows = rows_I0,
+  cols = cols_Ipost,
+  p_col = c("p_fdr","p"),
+  set_oob_to_NA = TRUE,
+  which_corr = "std"
+)
 
-cross <- make_cross_RP_from_tab(tab = tab,rows = rows_I0,cols = cols_Ipost,p_col = c("p_fisher","p"),set_oob_to_NA = TRUE)
+cross$R <- Corradj[rows_I0, cols_Ipost, drop = FALSE]
 
 p_cross <- plot_corr_circles_rect(
   R = cross$R,
@@ -318,45 +363,43 @@ p_cross <- plot_corr_circles_rect(
   legend_text_size = 9
 )
 
+no_y_left <- theme(
+  axis.text.y = element_blank(),
+  axis.ticks.y = element_blank()
+)
 
-
-p_all <- (I0frail + guides(size = "none", colour = "none") |
-            Ipostfrail + guides(size = "none", colour = "none") |
-            p_cross) +
-  plot_layout(guides = "collect") &
-  theme(legend.position = "right")
-
-
- 
-
-no_y_left <- theme(axis.text.y = element_blank(),axis.ticks.y = element_blank())
-
-no_y_right <- theme(axis.text.y.right  = element_blank(),  axis.ticks.y.right = element_blank())
-
-p_all <- ( I0frail + guides(size = "none", colour = "none") |
-    (Ipostfrail + guides(size = "none", colour = "none") + no_y_left) |
-    p_cross
+p_all <- (
+  I0frail + guides(size = "none", colour = "none") |
+  (Ipostfrail + guides(size = "none", colour = "none") + no_y_left) |
+  p_cross
 ) +
   plot_layout(guides = "collect") &
   theme(legend.position = "right")
 
-tikz("/home/nc/MEGA/BioPsychometrics/biomlatex/corrplots.tex", width = 14, height = 6.5, standAlone = FALSE,engine = "xetex")
+tikz("/home/nc/MEGA/BioPsychometrics/biomlatex/corrplots.tex",width = 14, height = 6.5, standAlone = FALSE, engine = "xetex")
 print(p_all)
 dev.off()
 
 
+
+######################################################## Residual correlation plot ######################################################################
+
 labs_resid <- c(origEQ, origKOOS)
+labs_resid <- labs_resid[labs_resid %in% rownames(R_resid_adj)]
 
-R_resid <- corr_resid_matrix_simple(est_interest_adj,base = "corr_resid",sep = "__")
+R_resid_plot <- R_resid_adj[labs_resid, labs_resid, drop = FALSE]
+R_resid_plot <- 0.5 * (R_resid_plot + t(R_resid_plot))
 
-labs_resid <- labs_resid[labs_resid %in% rownames(R_resid)]
-R_resid <- R_resid[labs_resid, labs_resid, drop = FALSE]
-R_resid <- 0.5 * (R_resid + t(R_resid))
-
-P_resid <- make_P_resid_from_tab(tab = tab_use,labs = labs_resid, base = "corr_resid", sep = "__",p_col = c("p_fdr", "p_fisher", "p"))
+P_resid <- make_P_resid_from_tab(
+  tab = tab_corr_fdr,
+  labs = labs_resid,
+  base = "corr_resid",
+  sep = "__",
+  p_col = c("p_fdr","p")
+)
 
 p_resid <- plot_corr_circles_lower(
-  R = R_resid,
+  R = R_resid_plot,
   P = P_resid,
   sd_vec = setNames(rep(1, length(labs_resid)), labs_resid),
   title = "Residual correlations",
@@ -364,9 +407,8 @@ p_resid <- plot_corr_circles_lower(
   block_split = 6,
   circle_max = 6,
   r_text_size = 3.5,
-  sd_text_size = 3.5,
-  
-)+ theme_corr_text(
+  sd_text_size = 3.5
+) + theme_corr_text(
   axis_x_size = 12,
   axis_y_size = 12,
   plot_title_size = 15,
@@ -374,69 +416,59 @@ p_resid <- plot_corr_circles_lower(
   legend_text_size = 9
 )
 
-p_resid
-
-
-tikz("/home/nc/MEGA/BioPsychometrics/biomlatex/residcor.tex", width = 6, height = 6, standAlone = FALSE,engine = "xetex")
+tikz("/home/nc/MEGA/BioPsychometrics/biomlatex/residcor.tex",
+     width = 6, height = 6, standAlone = FALSE, engine = "xetex")
 print(p_resid)
 dev.off()
 
 
-######################## Principal component analysis on correlation matrices ##############################################
+
+
+######################## Principal component analysis on correlation matrices ##########################################
+
 itemnamesEQ   <- c("Mobility","SelfCare","UsualAct","PainDisc","AnxDepr","Health")
 itemnamesKOOS <- c('OutBed','PutSocks','UpSit','Bend','Twist','Kneel','Squat')
 
 origEQ_full <- c("Mobility", "SelfCare","UsualActivities","PainorDiscomfort","Anxietyordepression","Perceivedcurrenthealthstatus")
-
 origKOOS_full <- c("Gettingoutofbed", "Puttingonsocks","Gettingupfromsitting", "Bendingtowardthefloor_pickinguponobjectfromtheground","Twisting_pivotingontheinjuredknee","Kneeling","Squatting")
 
-short_map_full <- c(setNames(itemnamesEQ, origEQ_full),setNames(itemnamesKOOS, origKOOS_full))
+short_map_full <- c(
+  setNames(itemnamesEQ, origEQ_full),
+  setNames(itemnamesKOOS, origKOOS_full)
+)
 
-cols_main <- c("EQ-5D_I0" = "#0F766E","EQ-5D_Ipost" = "#d1a00d","KOOS_I0" = "#5B21B6", "KOOS_Ipost" = "#52340b", "Frailty" = "#C2410C")
+cols_main <- c(
+  "EQ-5D_I0" = "#0F766E",
+  "EQ-5D_Ipost" = "#d1a00d",
+  "KOOS_I0" = "#5B21B6",
+  "KOOS_Ipost" = "#52340b",
+  "Frailty" = "#C2410C"
+)
 
 cols_resid <- c("EQ" = "grey40", "KOOS" = "#111111")
 
 R_I0 <- Corradj[grepl("I0", rownames(Corradj)), grepl("I0", colnames(Corradj)), drop = FALSE]
 R_Ipost <- Corradj[grepl("Ipost", rownames(Corradj)), grepl("Ipost", colnames(Corradj)), drop = FALSE]
 
-R_resid <- corr_resid_matrix_simple(est_interest_adj,base = "corr_resid",sep = "__")
-
 ord_resid <- c(origEQ_full, origKOOS_full)
-ord_resid <- ord_resid[ord_resid %in% rownames(R_resid)]
-R_resid <- R_resid[ord_resid, ord_resid, drop = FALSE]
-R_resid <- 0.5 * (R_resid + t(R_resid))
-R_resid <- as.matrix(nearPD(R_resid, corr = TRUE)$mat)
-rownames(R_resid) <- colnames(R_resid) <- ord_resid
+ord_resid <- ord_resid[ord_resid %in% rownames(R_resid_adj)]
 
-
-xy_I0 <- get_pca_xy(R_I0)
-xy_Ipost <- get_pca_xy(R_Ipost)
-xy_resid <- get_pca_xy(R_resid)
-
-all_x <- c(0, xy_I0$x, xy_Ipost$x, xy_resid$x)
-all_y <- c(0, xy_I0$y, xy_Ipost$y, xy_resid$y)
-
-ref_all <- max(abs(c(all_x, all_y)))
-xlim_common <- range(all_x) + c(-0.06, 0.30) * ref_all
-ylim_common <- range(all_y) + c(-0.10, 0.10) * ref_all
-
-
+R_resid_pca <- R_resid_adj[ord_resid, ord_resid, drop = FALSE]
+R_resid_pca <- 0.5 * (R_resid_pca + t(R_resid_pca))
 
 R_full <- Corradj[!grepl("frail", rownames(Corradj)), !grepl("frail", colnames(Corradj)), drop = FALSE]
 
 xy_full  <- get_pca_xy(R_full)
 xy_I0    <- get_pca_xy(R_I0)
 xy_Ipost <- get_pca_xy(R_Ipost)
-xy_resid <- get_pca_xy(R_resid)
+xy_resid <- get_pca_xy(R_resid_pca)
 
 all_x <- c(0, xy_full$x, xy_I0$x, xy_Ipost$x, xy_resid$x)
 all_y <- c(0, xy_full$y, xy_I0$y, xy_Ipost$y, xy_resid$y)
 
 ref_all <- max(abs(c(all_x, all_y)))
-
 xlim_common_all <- range(all_x) + c(-0.06, 0.30) * ref_all
 ylim_common_all <- range(all_y) + c(-0.10, 0.10) * ref_all
-
 
 p_full <- pca_plot_grouped(
   R_full,
@@ -493,7 +525,7 @@ p_pca_Ipost <- pca_plot_grouped(
 )
 
 p_pca_resid <- pca_plot_grouped(
-  R_resid,
+  R_resid_pca,
   main = "(d)",
   short_map = short_map_full,
   eq_base = origEQ_full,
@@ -510,8 +542,11 @@ p_pca_resid <- pca_plot_grouped(
   legend_text_size = 14
 )
 
-
-no_y_numbers <- theme(axis.text.y = element_blank(),axis.ticks.y = element_line(color = "black"),axis.ticks.length.y = grid::unit(2.2, "mm"))
+no_y_numbers <- theme(
+  axis.text.y = element_blank(),
+  axis.ticks.y = element_line(color = "black"),
+  axis.ticks.length.y = grid::unit(2.2, "mm")
+)
 
 p_all <- wrap_plots(
   p_full,
@@ -528,11 +563,9 @@ p_all <- wrap_plots(
 
 out_tex <- "/home/nc/MEGA/BioPsychometrics/biomlatex/pca.tex"
 
-tikz(out_tex, width = 20, height = 20, standAlone = FALSE,engine = "xetex")
+tikz(out_tex, width = 20, height = 20, standAlone = FALSE, engine = "xetex")
 print(p_all)
-
 dev.off()
-
 
 
 
@@ -559,7 +592,7 @@ item_labels <- c(Mobility = "Mobility", SelfCare = "SelfCare", UsualActivities =
 
 
 
-prep = prep_long_all_items_surv_mixed2( dat = dat, ord_itemnames = itemnames, cont_itemnames = "Perceivedcurrenthealthstatus", cont_transforms = cont_tf, surv_outcome = "failure",  admin_date = "2025-01-01")
+prep = prep_long_all_items_surv_mixed2( dat = dat_pred, ord_itemnames = itemnames, cont_itemnames = "Perceivedcurrenthealthstatus", cont_transforms = cont_tf, surv_outcome = "failure",  admin_date = "2025-01-01")
 
 long_dat <- prep$long
 K_by_item  <- prep$K_by_item
