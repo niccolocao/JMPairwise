@@ -657,34 +657,52 @@ Ycont3 <- c(70, 80, 85)
 
 
 # covariates
+age_mean_raw <- dat_pred |>
+  dplyr::distinct(ID, age) |>
+  dplyr::summarise(m = mean(age, na.rm = TRUE)) |>
+  dplyr::pull(m)
+
+waiting_mean_raw <- dat_pred |>
+  dplyr::distinct(ID, date_baseline, date_intervention) |>
+  dplyr::summarise(
+    m = mean(as.numeric(difftime(date_intervention, date_baseline, units = "days")) / 30.4375,
+             na.rm = TRUE)
+  ) |>
+  dplyr::pull(m)
+
+loghosp_mean_raw <- dat_pred |>
+  dplyr::distinct(ID, hospitalizationdays) |>
+  dplyr::summarise(m = mean(log1p(hospitalizationdays), na.rm = TRUE)) |>
+  dplyr::pull(m)
+
 dat0_fake1 <- data.frame(
   ID = fake1_id,
-  age = mean(long_dat$age, na.rm = TRUE),
+  age = age_mean_raw,
   sex01 = 0L,
   diag_oa = 0L,
-  loghosp = mean(long_dat$loghosp, na.rm = TRUE),
+  loghosp = loghosp_mean_raw,
   prost_uni = 0L,
-  waiting = mean(long_dat$waiting, na.rm = TRUE)
+  waiting = waiting_mean_raw
 )
 
 dat0_fake2 <- data.frame(
   ID = fake2_id,
-  age = mean(long_dat$age, na.rm = TRUE),
+  age = age_mean_raw,
   sex01 = 0L,
   diag_oa = 0L,
-  loghosp = mean(long_dat$loghosp, na.rm = TRUE),
+  loghosp = loghosp_mean_raw,
   prost_uni = 0L,
-  waiting = mean(long_dat$waiting, na.rm = TRUE)
+  waiting = waiting_mean_raw
 )
 
 dat0_fake3 <- data.frame(
   ID = fake3_id,
-  age = mean(long_dat$age, na.rm = TRUE),
+  age = age_mean_raw,
   sex01 = 0L,
   diag_oa = 0L,
-  loghosp = mean(long_dat$loghosp, na.rm = TRUE),
+  loghosp = loghosp_mean_raw,
   prost_uni = 0L,
-  waiting = mean(long_dat$waiting, na.rm = TRUE)
+  waiting = waiting_mean_raw
 )
 
 # history construction
