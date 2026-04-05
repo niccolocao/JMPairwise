@@ -1,6 +1,6 @@
 
 
-# latex util
+#escape special characters for latex-safe text output
 latex_escape <- function(x) {
   x <- as.character(x)
   x <- gsub("\\\\", "\\\\textbackslash{}", x)
@@ -10,7 +10,9 @@ latex_escape <- function(x) {
   x
 }
 
-############# wald for all + FDR for correlations only
+
+
+#build a generic wald table for named estimates and standard errors, with optional fdr only for correlations
 wald_table_raw <- function(est, se,
                            alpha = 0.05,
                            null = NULL,       
@@ -98,6 +100,7 @@ wald_table_raw <- function(est, se,
   tab
 }
 
+#perform wald tests for correlations on the fisher-z scale and optionally apply fdr correction
 wald_fisher_from_r <- function(est_r, se_r,
                                alpha = 0.05,
                                eps = 1e-6,
@@ -140,6 +143,8 @@ wald_fisher_from_r <- function(est_r, se_r,
   out[order(out$p), ]
 }
 
+
+#find a parameter name allowing both possible orders of the pair labels
 get_name_anyorder <- function(vnames, prefix, A, B) {
   n1 <- paste0(prefix, A, "__", B)
   n2 <- paste0(prefix, B, "__", A)
@@ -148,6 +153,7 @@ get_name_anyorder <- function(vnames, prefix, A, B) {
   NA_character_
 }
 
+# compute the frailty-correlation contrast between post and baseline and derive its standard error by delta method
 corrdiff_frailty_table_from_interest <- function(est_interest_adj, V_interest,
                                                  items = NULL,
                                                  t_pre = "I0",
@@ -264,6 +270,7 @@ corrdiff_frailty_table_from_interest <- function(est_interest_adj, V_interest,
 ########################################################
 library(RColorBrewer)
 
+#color scale for correlation plots
 scale_corr_colors <- function() {
   scale_color_gradientn(
     colours = rev(brewer.pal(11, "RdBu")),
@@ -272,6 +279,7 @@ scale_corr_colors <- function() {
   )
 }
 
+#convert internal variable names into shorter plot labels
 make_pretty_label_vec <- function(x, map_base = short_map_base) {
   x <- as.character(x)
   x[x == "frailty"] <- "Frailty"
@@ -283,6 +291,7 @@ make_pretty_label_vec <- function(x, map_base = short_map_base) {
   out
 }
 
+#convert internal variable names into shorter plot labels
 update_corr_est_from_matrix <- function(est, R, prefix = "corr_") {
   stopifnot(is.numeric(est), !is.null(names(est)))
   stopifnot(is.matrix(R), !is.null(rownames(R)), !is.null(colnames(R)))
@@ -314,6 +323,7 @@ update_corr_est_from_matrix <- function(est, R, prefix = "corr_") {
   out
 }
 
+#build a correlation table using fisher-z tests and fdr for standard and/or residual correlations
 make_corr_table_fisher_fdr <- function(est, se,
                                        family = c("all","std","resid"),
                                        alpha = 0.05,
@@ -391,6 +401,8 @@ make_corr_table_fisher_fdr <- function(est, se,
   )
 }
 
+
+#parse a correlation results table and optionally restrict it to standard or residual correlations
 parse_corr_tab <- function(tab, which_corr = c("std", "resid", "all")) {
   which_corr <- match.arg(which_corr)
   
@@ -432,7 +444,7 @@ parse_corr_tab <- function(tab, which_corr = c("std", "resid", "all")) {
   tt
 }
 
-
+#reconstruct a square correlation matrix and matching p-value matrix from a long correlation table
 make_RP_from_tab <- function(tab, labs, p_col = c("p_fisher","p"),
                              set_oob_to_NA = TRUE,
                              which_corr = c("std", "resid", "all")) {
@@ -474,7 +486,7 @@ make_RP_from_tab <- function(tab, labs, p_col = c("p_fisher","p"),
   list(R = R, P = P, tab_used = tt)
 }
 
-
+#reconstruct a rectangular correlation block and p-value block for cross-time associations
 make_cross_RP_from_tab <- function(tab, rows, cols, p_col = c("p_fisher","p"),
                                    set_oob_to_NA = TRUE,
                                    which_corr = c("std", "resid", "all")) {
@@ -557,6 +569,7 @@ theme_corr_text <- function(
   )
 }
 
+#plot a lower-triangular correlation matrix with circles, numeric labels, and standard deviations on the diagonal
 plot_corr_circles_lower <- function(R, P = NULL, alpha = 0.05,
                                     sd_vec = NULL, title = NULL,
                                     circle_max = 12, size_gamma = 1.7,
@@ -748,6 +761,7 @@ plot_corr_circles_lower <- function(R, P = NULL, alpha = 0.05,
   p
 }
 
+#plot a rectangular cross-block correlation matrix with circles, labels, and optional out-of-bounds markers
 plot_corr_circles_rect <- function(R, P = NULL, alpha = 0.05,
                                    title = NULL,
                                    x_title = "Post-intervention",
@@ -921,15 +935,12 @@ plot_corr_circles_rect <- function(R, P = NULL, alpha = 0.05,
   p
 }
 
-
+#build a p-value matrix for residual correlations from a long results table
 make_P_resid_from_tab <- function(tab, labs,
                                   base = "corr_resid",
                                   sep = "__",
                                   p_col = c("p_fdr", "p_fisher", "p")) {
   p_name <- p_col[p_col %in% names(tab)][1]
-  if (length(p_name) == 0 || is.na(p_name)) {
-    stop("nessuna colonna p trovata in tab")
-  }
   
   par <- if ("label" %in% names(tab)) {
     tab$label
@@ -965,8 +976,7 @@ make_P_resid_from_tab <- function(tab, labs,
   P
 }
 
-
-      
+# plot a rectangular cross-block correlation matrix with circles, labels, and optional out-of-bounds markers   
 make_labs_time <- function(est, time = c("I0","Ipost"),
                            include_frailty = FALSE,
                            base_order = .default_base_order) {
@@ -988,12 +998,13 @@ panel_title <- function(tag, title, add = add_abc) {
 
 
       
-#### wald su cov
+#### wald for cov
+
+#extract frailty-related covariance parameters and organize them by item and time
 make_covtab_frailty <- function(psi, se = NULL, times = c("I0","Ipost")) {
   nm <- names(psi)
-  if (is.null(nm)) stop("psi deve essere un named numeric vector.")
   
-  # due formati ammessi:
+  
   # 1) cov_frailty__Mobility_I0
   # 2) cov_Mobility_I0__frailty
   pat1 <- "^cov_frailty__(.+)$"
@@ -1001,11 +1012,6 @@ make_covtab_frailty <- function(psi, se = NULL, times = c("I0","Ipost")) {
   
   cov_names <- unique(c(grep(pat1, nm, value = TRUE),
                         grep(pat2, nm, value = TRUE)))
-  
-  if (length(cov_names) == 0) {
-    warning("Nessuna cov frailty–item trovata (pattern cov_frailty__* o cov_*__frailty).")
-    return(data.frame())
-  }
   
   get_item_time <- function(pname) {
     it <- NA_character_
@@ -1027,7 +1033,7 @@ make_covtab_frailty <- function(psi, se = NULL, times = c("I0","Ipost")) {
   time      <- vapply(info, `[[`, character(1), "time")
   
   out <- data.frame(
-    param     = cov_names,                    # <-- nome originale completo
+    param     = cov_names,                    
     item_time = item_time,
     item      = item,
     time      = time,
@@ -1035,8 +1041,8 @@ make_covtab_frailty <- function(psi, se = NULL, times = c("I0","Ipost")) {
     se        = if (!is.null(se)) unname(se[cov_names]) else NA_real_,
     stringsAsFactors = FALSE
   )
+
   
-  # tieni solo tempi richiesti se presenti (I0/Ipost); se time NA, li lasciamo fuori
   out <- out[!is.na(out$time), , drop = FALSE]
   
   out <- out[order(out$time, out$item_time), ]
@@ -1045,6 +1051,7 @@ make_covtab_frailty <- function(psi, se = NULL, times = c("I0","Ipost")) {
 }
 
 
+#perform a joint wald test for a selected set of parameters using either a full vcov or diagonal se approximation
 wald_joint <- function(psi, params, V = NULL, se = NULL, rank_tol = 1e-10) {
   nm <- names(psi)
   if (is.null(nm)) stop("psi deve essere un named numeric vector.")
@@ -1067,8 +1074,7 @@ wald_joint <- function(psi, params, V = NULL, se = NULL, rank_tol = 1e-10) {
     rownames(V_sub) <- colnames(V_sub) <- params
   }
   
-  # simmetrizza per sicurezza numerica
-  V_sub <- 0.5 * (V_sub + t(V_sub))
+ V_sub <- 0.5 * (V_sub + t(V_sub))
   
   # df effettivi (rank)
   eig <- eigen(V_sub, symmetric = TRUE, only.values = TRUE)$values
@@ -1083,7 +1089,7 @@ wald_joint <- function(psi, params, V = NULL, se = NULL, rank_tol = 1e-10) {
   list(W = W, df = df_eff, p = p, params = params, V_sub = V_sub, c_hat = c_hat)
 }
 
-
+#subset the frailty covariance table by item group and/or time
 subset_covtab <- function(cov_tab, items = NULL, time = NULL) {
   out <- cov_tab
   if (!is.null(items)) out <- out[out$item %in% items, , drop = FALSE]
@@ -1091,6 +1097,7 @@ subset_covtab <- function(cov_tab, items = NULL, time = NULL) {
   out
 }
 
+#helper to run a joint covariance test and return one summary row
 make_test_row_cov <- function(label, cov_tab_sub, psi, V = NULL, se = NULL) {
   if (is.null(cov_tab_sub) || nrow(cov_tab_sub) == 0) {
     return(data.frame(test = label, n = 0L, W = NA_real_, df = NA_real_, p = NA_real_))
@@ -1099,7 +1106,7 @@ make_test_row_cov <- function(label, cov_tab_sub, psi, V = NULL, se = NULL) {
   data.frame(test = label, n = nrow(cov_tab_sub), W = r$W, df = r$df, p = r$p)
 }
 
-
+#run a suite of joint wald tests for frailty covariances across all items and predefined subgroups
 wald_frailty_cov_suite <- function(psi_global, se_global = NULL, V_global = NULL,
                                    EQ_items, KOOS_items,
                                    times = c("I0","Ipost")) {
@@ -1154,7 +1161,8 @@ strip_D_summaries_from_est <- function(est) {
   )
   est[keep]
 }
-                   
+
+#compute pca loadings and explained variance proportions for a symmetric matrix
 pca_loadings_df <- function(M) {
   M <- as.matrix(M)
   eg <- eigen(M, symmetric = TRUE)
@@ -1173,6 +1181,7 @@ pca_loadings_df <- function(M) {
 }
 
 
+#build a grouped pca loading plot for timed or residual correlation structures
 pca_plot_grouped <- function(M,
                              main = "",
                              short_map,
@@ -1480,6 +1489,7 @@ pca_plot_grouped <- function(M,
 }
 
   
+#extract frailty correlations in wide format using fisher-z tests and fdr-adjusted p-values
 extract_frailty_corr_wide_fisher_fdr <- function(est, se,
                                                  alpha = 0.05,
                                                  item_levels = NULL,
@@ -1589,7 +1599,8 @@ extract_frailty_corr_wide_fisher_fdr <- function(est, se,
 
 
 
-  extract_fixed_wald_wide_fdr <- function(psi, se,
+# extract fixed-effect estimates in wide format with wald tests and fdr-adjusted p-values
+extract_fixed_wald_wide_fdr <- function(psi, se,
                                         alpha = 0.05,
                                         predictors = c("I6","I12","wI6","wI12","pI6","pI12",
                                                        "diag_oa","sex01","loghosp_post","age"),
@@ -1661,7 +1672,7 @@ extract_frailty_corr_wide_fisher_fdr <- function(est, se,
   out
 }
 
-
+#combine fixed effects and frailty correlations into one wide table with separate fdr corrections
   make_wald_table_3cols_fdr <- function(psi, se, est_corr,
                                       alpha = 0.05,
                                       predictors = c("I6","I12","wI6","wI12","pI6","pI12",
@@ -1708,6 +1719,8 @@ extract_frailty_corr_wide_fisher_fdr <- function(est, se,
   rownames(out) <- NULL
   out
 }
+
+#export the wide fixed-effect table to latex using fdr-adjusted p-values for significance marks
 make_latex_beta_table_fdr <- function(tab_items3,
                                       predictors = c("I6","I12","wI6","wI12","pI6","pI12",
                                                      "diag_oa","sex01","loghosp_post","age"),
@@ -1824,7 +1837,7 @@ escape_for_texttt <- function(x) {
 
 
 #### Wald congiunto per H0 : Cov(b_{ik2}-b_{ik1},s_i)
-
+#perform a general linear wald test for L psi = c0
 wald_linear <- function(psi, L, V = NULL, se = NULL, c0 = NULL, rank_tol = 1e-10) {
   stopifnot(is.numeric(psi), !is.null(names(psi)))
   
@@ -1864,6 +1877,9 @@ wald_linear <- function(psi, L, V = NULL, se = NULL, c0 = NULL, rank_tol = 1e-10
   list(W = W, df = df_eff, p = p, est = est, V = Vc, L = L)
 }
 
+
+
+#build the contrast matrix for testing post-minus-baseline frailty covariances for each item
 make_L_shiftcov_frailty <- function(psi_names, items,
                                     t_pre = "I0",
                                     t_post = "Ipost",
@@ -1888,6 +1904,7 @@ make_L_shiftcov_frailty <- function(psi_names, items,
   L
 }
 
+#run the joint wald test for changes in frailty covariance from baseline to post-intervention
 wald_shiftcov_frailty <- function(psi_global, V_global = NULL, se_global = NULL,
                                   items,
                                   t_pre = "I0",
