@@ -14,101 +14,128 @@ library(grid)
 source("pairwiseUtilities.R")
 source("genericUtilities.R")
 
-
-
+### Number of response categories for each ordinal item:
+# EQ-5D items have 3 categories, KOOS items have 5 categories
+# This map is used to keep the number of thresholds fixed across pairwise fits
 K_map <- c(
-  setNames(rep(3L, 5L), c('Mobility','SelfCare','UsualActivities','PainorDiscomfort','Anxietyordepression')),
-  setNames(rep(5L, 7L), c('Gettingoutofbed','Puttingonsocks','Gettingupfromsitting',
-                          'Bendingtowardthefloor_pickinguponobjectfromtheground',
-                          'Twisting_pivotingontheinjuredknee','Kneeling','Squatting'))
+  setNames(rep(3L, 5L), c(
+    "Mobility", "SelfCare", "UsualActivities",
+    "PainorDiscomfort", "Anxietyordepression"
+  )),
+  setNames(rep(5L, 7L), c(
+    "Gettingoutofbed", "Puttingonsocks", "Gettingupfromsitting",
+    "Bendingtowardthefloor_pickinguponobjectfromtheground",
+    "Twisting_pivotingontheinjuredknee", "Kneeling", "Squatting"
+  ))
 )
 
+#bivariate pairwise fits
+files <- list.files("pairwise_9_bivar/", pattern = ".rds", full.names = TRUE)
 
-files <- list.files("pairwise_9_bivar/", pattern=".rds", full.names=TRUE)
-
-
-# Extract bivariate fit estimates
+# extract parameters, Hessians, gradients from each fit.
 out_list <- lapply(files, process_one, K_map = K_map)
 names(out_list) <- basename(files)
-ex_list <- lapply(out_list, `[[`, "ex")         
-pair_tags <- names(out_list)                 
+ex_list <- lapply(out_list, `[[`, "ex")
 
-# Estimated J and K matrices, with Sigma(\hat theta) for estimates on original scale 
-# Cholesky + log on diagonal for D and log for weibull and beta
+pair_tags <- names(out_list)
+
+# Prefix parameter names with the pair tag so that the same parameter coming from different pairs remains distinguishable before averaging
 ex_pref_for_jk <- Map(prefix_ex, ex_list, pair_tags)
-jk_all <- JK_all_pairs(ex_pref_for_jk, hessian_of = "neglogLik")
-V_theta <- jk_all$vcov_theta   
 
-# transformation of D from cholesky + log on diagonal to var covar first with delta method on the elements of Sigma(\hat theta)
+# Build the global J and K matrices from all pairwise fits. This gives the sandwich covariance for the stacked pair-specific parameter vector
+# At this stage, parameters are still on the original estimation scale: Cholesky form for D, log-diagonal for variances, log-scale for Weibull/normal parameters.
+jk_all <- JK_all_pairs(ex_pref_for_jk, hessian_of = "neglogLik")
+V_theta <- jk_all$vcov_theta
+
+# First delta-method step:
+# transform the D-related parameters from Cholesky representationto variance-covariance representation within each pair
 pre <- predelta_prepare(ex_list, pair_tags, jk_vcov_theta = V_theta)
 psi_all <- pre$psi_all
 V_psi_all <- pre$V_psi
 
-# Averaging over var covar for D and the other parameters on original scale
+# Average duplicated estimates across pairs:
+# Estimates that represent the same quantity across different pairwise fits are merged through the averaging matrix A.
 A_all <- build_A(psi_all, canonicalizer = canonicalizer_all)
+
+# Global averaged estimates
 psi_global <- as.numeric(A_all %*% psi_all)
 names(psi_global) <- rownames(A_all)
 
+# Global covariance matrix after averaging
 V_global <- A_all %*% V_psi_all %*% t(A_all)
-V_global <- 0.5 * (V_global + t(V_global)) #symmetry for numeric stability
+V_global <- 0.5 * (V_global + t(V_global))  # symmetry for numerical stability
 
+# Standard errors on the averaged scale
 se_global <- sqrt(diag(V_global))
 
-
-# Trasfomation of the other parameters on scale of interest (e.g., sd and corr) + delta method
+# Second delta-method step:
+# transform parameters to more interpretable quantities such as standard deviations, correlations, hazard ratios, Weibull parameters, etc.
 est_interest <- derive_interest(psi_global)
 
+# Jacobian of the transformation from psi_global to the scale of interest
 Jg <- jacobian(func = g, x = psi_global)
 colnames(Jg) <- names(psi_global)
 rownames(Jg) <- names(derive_interest(psi_global))
 
+# covariance matrix on the transformed scale
 V_interest <- Jg %*% V_global %*% t(Jg)
-V_interest <- 0.5 * (V_interest + t(V_interest)) #symmetry for numeric stability
+V_interest <- 0.5 * (V_interest + t(V_interest)) #symmetry for numerical stability
 
+# standard errors for transformed parameters
 se_interest <- sqrt(diag(V_interest))
 
+# reconstruct the random-effects variance-covariance matrix D and the corresponding correlation matrix from psi_global
+outD <- re_varcov_matrix2(psi_global, label_filter = "(_I0|_Ipost|frailty)$")
 
-# D var covar and sd corr
-outD = re_varcov_matrix2(psi_global, label_filter = "(_I0|_Ipost|frailty)$")
-
-
-
-### correction  for non SPD
+# Optional correction if D is not symmetric positive definite: negative eigenvalues are truncated to a very small positive number
 eigenvalues <- eigen(outD$D)$values
-eigenvectors = eigen(outD$D)$vectors
-eigenvalues[eigenvalues<0]<-1e-12
+eigenvectors <- eigen(outD$D)$vectors
+eigenvalues[eigenvalues < 0] <- 1e-12
 
-Dadj = eigenvectors%*%diag(eigenvalues)%*%t(eigenvectors)
-rownames(Dadj) = rownames(outD$D)
-colnames(Dadj) = colnames(outD$D)
+Dadj <- eigenvectors %*% diag(eigenvalues) %*% t(eigenvectors)
+rownames(Dadj) <- rownames(outD$D)
+colnames(Dadj) <- colnames(outD$D)
 
+# Define the desired ordering of random effects: baseline effects, post-intervention effects, and frailty.
+itemnames <- c("Mobility", "SelfCare", "UsualActivities", "PainorDiscomfort","Anxietyordepression", "Gettingoutofbed", "Puttingonsocks",
+  "Gettingupfromsitting", "Bendingtowardthefloor_pickinguponobjectfromtheground","Twisting_pivotingontheinjuredknee", "Kneeling", "Squatting",
+  "Perceivedcurrenthealthstatus"
+)
 
-itemnames <- c('Mobility','SelfCare','UsualActivities','PainorDiscomfort','Anxietyordepression','Gettingoutofbed','Puttingonsocks','Gettingupfromsitting','Bendingtowardthefloor_pickinguponobjectfromtheground','Twisting_pivotingontheinjuredknee','Kneeling','Squatting',"Perceivedcurrenthealthstatus")
-ordD = c(paste0(itemnames,"_I0"),paste0(itemnames,"_Ipost"),'frailty')
-Dadj <- Dadj[ordD,ordD]
+ordD <- c(paste0(itemnames, "_I0"), paste0(itemnames, "_Ipost"),"frailty")
 
+Dadj <- Dadj[ordD, ordD]
 Corradj <- cov2cor(Dadj)
 
+# Update transformed estimates so that sd_* and corr_* are consistent with the corrected positive-definite D matrix
+est_interest_adj <- update_est_interest_from_D(
+  est_interest, Dadj, Corradj, representation = "corr"
+)
 
-# update est_interest for sd_ e corr_
-est_interest_adj <- update_est_interest_from_D(est_interest, Dadj, Corradj,representation = "corr")
+# Build a final vector/covariance object that keeps:
+# - all untransformed parameters from psi_global
+# - transformed parameters of interest
+# - but drops raw var_* and cov_* since correlations/sds are used instead
+res_full <- build_interest_full(
+  psi_global = psi_global,
+  V_global = V_global,
+  est_trans = est_interest_adj,
+  J_trans = Jg,
+  keep_untransformed = names(psi_global),
+  drop_untransformed_regex = "^(var_|cov_)",
+  out_order = NULL
+)
 
-
-
-
-##### only correlations
-res_full <- build_interest_full(psi_global = psi_global, V_global= V_global,est_trans= est_interest_adj,J_trans = Jg, keep_untransformed = names(psi_global), drop_untransformed_regex = "^(var_|cov_)", out_order = NULL)
-
+# Final estimates, covariance matrix, and standard errors after replacing raw D elements 
 est_full_nocov <- res_full$est
-V_full_nocov   <- res_full$V
-se_full_nocov  <- res_full$se
+V_full_nocov <- res_full$V
+se_full_nocov <- res_full$se
 
-
-
-# Vector of estimates for dynamic prediction with  var cov and untrasformed estiamtes, except for SPD correction to D
-psi_adj_cov <- update_est_interest_from_D(psi_global, Dadj, Corradj,representation = "cov")
-
-
+# Alternative version:
+# keep the random-effects structure on the variance-covariance scale, but replace the D-related entries with the corrected SPD-adjusted values
+psi_adj_cov <- update_est_interest_from_D(
+  psi_global, Dadj, Corradj, representation = "cov"
+)
 
 
 
@@ -122,7 +149,7 @@ tab_items3 <- make_wald_table_3cols(psi = psi_global,se= se_global,alpha = 0.05,
 )
 
 
-# esempio mappa (opzionale) per rinominare le righe:
+
 item_map <- c(Mobility = "Mobility", SelfCare = "SelfCare",UsualActivities = "UsualAct", PainorDiscomfort = "PainDisc", Anxietyordepression = "AnxDepr",   
   Gettingoutofbed = "OutBed", Puttingonsocks = "PutSocks", Gettingupfromsitting = "UpSit", Bendingtowardthefloor_pickinguponobjectfromtheground="Bend", Twisting_pivotingontheinjuredknee = "Twist", Kneeling = "Kneel", Squatting = "Squat")
 
