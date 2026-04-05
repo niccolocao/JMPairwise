@@ -11,7 +11,7 @@ library(knitr)
 library(kableExtra)
 library(ggrepel)
 library(grid)
-source("pairaveFuns.R")
+source("pairwiseUtilities.R")
 
 
 
@@ -38,7 +38,7 @@ ex_pref_for_jk <- Map(prefix_ex, ex_list, pair_tags)
 jk_all <- JK_all_pairs(ex_pref_for_jk, hessian_of = "neglogLik")
 V_theta <- jk_all$vcov_theta   
 
-# transformation of D from cholesky + log on diagonal to var covar first with delta method on the elements os Sigma(\hat theta)
+# transformation of D from cholesky + log on diagonal to var covar first with delta method on the elements of Sigma(\hat theta)
 pre <- predelta_prepare(ex_list, pair_tags, jk_vcov_theta = V_theta)
 psi_all <- pre$psi_all
 V_psi_all <- pre$V_psi
@@ -68,10 +68,7 @@ se_interest <- sqrt(diag(V_interest))
 
 
 # D var covar and sd corr
-outD = re_varcov_matrix2(
-  psi_global,
-  label_filter = "(_I0|_Ipost|frailty)$"       # tieni solo questi
-)
+outD = re_varcov_matrix2(psi_global, label_filter = "(_I0|_Ipost|frailty)$")
 
 
 
@@ -85,11 +82,7 @@ rownames(Dadj) = rownames(outD$D)
 colnames(Dadj) = colnames(outD$D)
 
 
-itemnames <- c('Mobility','SelfCare','UsualActivities','PainorDiscomfort','Anxietyordepression',
-               'Gettingoutofbed','Puttingonsocks','Gettingupfromsitting',
-               'Bendingtowardthefloor_pickinguponobjectfromtheground',
-               'Twisting_pivotingontheinjuredknee','Kneeling','Squatting',"Perceivedcurrenthealthstatus"
-               )
+itemnames <- c('Mobility','SelfCare','UsualActivities','PainorDiscomfort','Anxietyordepression','Gettingoutofbed','Puttingonsocks','Gettingupfromsitting','Bendingtowardthefloor_pickinguponobjectfromtheground','Twisting_pivotingontheinjuredknee','Kneeling','Squatting',"Perceivedcurrenthealthstatus")
 ordD = c(paste0(itemnames,"_I0"),paste0(itemnames,"_Ipost"),'frailty')
 Dadj <- Dadj[ordD,ordD]
 
@@ -103,15 +96,7 @@ est_interest_adj <- update_est_interest_from_D(est_interest, Dadj, Corradj,repre
 
 
 ##### only correlations
-res_full <- build_interest_full(
-  psi_global = psi_global,
-  V_global   = V_global,
-  est_trans  = est_interest_adj,
-  J_trans    = Jg,
-  keep_untransformed = names(psi_global),
-  drop_untransformed_regex = "^(var_|cov_)",   # <<<<<< toglie var/cov dal blocco "as-is"
-  out_order = NULL
-)
+res_full <- build_interest_full(psi_global = psi_global, V_global= V_global,est_trans= est_interest_adj,J_trans = Jg, keep_untransformed = names(psi_global), drop_untransformed_regex = "^(var_|cov_)", out_order = NULL)
 
 est_full_nocov <- res_full$est
 V_full_nocov   <- res_full$V
@@ -120,10 +105,7 @@ se_full_nocov  <- res_full$se
 
 
 # Vector of estimates for dynamic prediction with  var cov and untrasformed estiamtes, except for SPD correction to D
-psi_adj_cov <- update_est_interest_from_D(
-  psi_global, Dadj, Corradj,
-  representation = "cov"
-)
+psi_adj_cov <- update_est_interest_from_D(psi_global, Dadj, Corradj,representation = "cov")
 
 
 
@@ -133,46 +115,20 @@ psi_adj_cov <- update_est_interest_from_D(
 
 item_order <- setdiff(.default_base_order, "frailty")
 
-tab_items3 <- make_wald_table_3cols(
-  psi = psi_global,
-  se  = se_global,
-  alpha = 0.05,
+tab_items3 <- make_wald_table_3cols(psi = psi_global,se= se_global,alpha = 0.05,
   predictors = c("I6","I12","wI6","wI12","pI6","pI12","diag_oa","sex01","loghosp_post","age"),
   item_levels = item_order
 )
 
 
 # esempio mappa (opzionale) per rinominare le righe:
-item_map <- c(
-  Mobility = "Mobility",
-  SelfCare = "SelfCare",
-  UsualActivities = "UsualAct",
-  PainorDiscomfort = "PainDisc",
-  Anxietyordepression = "AnxDepr",   
-  Gettingoutofbed = "OutBed",
-  Puttingonsocks = "PutSocks",
-  Gettingupfromsitting = "UpSit", 
-  Bendingtowardthefloor_pickinguponobjectfromtheground="Bend",
-  Twisting_pivotingontheinjuredknee = "Twist",
-  Kneeling = "Kneel",
-  Squatting = "Squat"
-)
+item_map <- c(Mobility = "Mobility", SelfCare = "SelfCare",UsualActivities = "UsualAct", PainorDiscomfort = "PainDisc", Anxietyordepression = "AnxDepr",   
+  Gettingoutofbed = "OutBed", Puttingonsocks = "PutSocks", Gettingupfromsitting = "UpSit", Bendingtowardthefloor_pickinguponobjectfromtheground="Bend", Twisting_pivotingontheinjuredknee = "Twist", Kneeling = "Kneel", Squatting = "Squat")
 
 
 preds <- c("I6","I12","wI6","wI12","pI6","pI12","diag_oa","sex01","loghosp_post","age")
 
-latex_tab <- make_latex_beta_table(
-  tab_items3,
-  predictors = preds,
-  item_name_map = item_map,   # oppure NULL
-  alpha = 0.05,
-  digits_est = 3,
-  digits_se  = 3,
-  caption = "Fixed effects by item (Wald test; $^{*}$ p<0.05).",
-  label   = "tab:fixed_items",
-  use_resizebox = TRUE
-)
-
+latex_tab <- make_latex_beta_table(tab_items3,predictors = preds,item_name_map = item_map, alpha = 0.05, digits_est = 3,digits_se = 3, caption = "Fixed effects by item (Wald test; $^{*}$ p<0.05).",label   = "tab:fixed_items", use_resizebox = TRUE)
 cat(latex_tab)
 
 
@@ -193,12 +149,9 @@ tab_fisher <- wald_fisher_from_r(corr_frail, se_frail)
 
 ################# Simultaneous Wald test on covariances  Cov(b_ik1, s_i) = Cov(b_ik2, s_i) = 0 for different subgroups of items
 EQ_items <- c("Mobility","SelfCare","UsualActivities","PainorDiscomfort","Anxietyordepression", "Perceivedcurrenthealthstatus")
-KOOS_items <- c("Gettingoutofbed","Gettingupfromsitting",
-                "Bendingtowardthefloor_pickinguponobjectfromtheground",
-                "Twisting_pivotingontheinjuredknee","Kneeling","Squatting","Puttingonsocks")
+KOOS_items <- c("Gettingoutofbed","Gettingupfromsitting","Bendingtowardthefloor_pickinguponobjectfromtheground","Twisting_pivotingontheinjuredknee","Kneeling","Squatting","Puttingonsocks")
 
-res_wald <- wald_frailty_cov_suite(psi_global, se_global = se_global, V_global = V_global,
-                              EQ_items = EQ_items, KOOS_items = KOOS_items)
+res_wald <- wald_frailty_cov_suite(psi_global, se_global = se_global, V_global = V_global,EQ_items = EQ_items, KOOS_items = KOOS_items)
 
 
 res_wald$tests = res_wald$tests[,-2]
@@ -212,50 +165,22 @@ kable(res_wald$tests,
 
 
 # Correlations Cor(b_ik2 - b_ik1, s_i)
-tab_cd2 <- corrdiff_frailty_table_from_interest(
-  est_interest_adj = est_interest_adj,
-  V_interest = V_interest,
-  sort_by = "p_fdr"
-)
+tab_cd2 <- corrdiff_frailty_table_from_interest(est_interest_adj = est_interest_adj, V_interest = V_interest, sort_by = "p_fdr")
 tab_cd2
 
 
 ###### Simultaneous Wald test on covariances Cov(b_ik2 - b_ik1, s_i) = 0 
-EQ_items <- c(
-  "Mobility","SelfCare","UsualActivities",
-  "PainorDiscomfort","Anxietyordepression",
-  "Perceivedcurrenthealthstatus"
-)
+EQ_items <- c("Mobility","SelfCare","UsualActivities","PainorDiscomfort","Anxietyordepression", "Perceivedcurrenthealthstatus")
 
-KOOS_items <- c(
-  "Gettingoutofbed","Gettingupfromsitting",
-  "Bendingtowardthefloor_pickinguponobjectfromtheground",
-  "Twisting_pivotingontheinjuredknee","Kneeling",
-  "Squatting","Puttingonsocks"
-)
+KOOS_items <- c("Gettingoutofbed","Gettingupfromsitting", "Bendingtowardthefloor_pickinguponobjectfromtheground","Twisting_pivotingontheinjuredknee","Kneeling","Squatting","Puttingonsocks")
 
 all_items <- c(EQ_items, KOOS_items)
 
-res_shiftcov_all <- wald_shiftcov_frailty(
-  psi_global = psi_global,
-  V_global = V_global,
-  se_global = se_global,
-  items = all_items
-)
+res_shiftcov_all <- wald_shiftcov_frailty(psi_global = psi_global,V_global = V_global, se_global = se_global, items = all_items)
 
-res_shiftcov_EQ <- wald_shiftcov_frailty(
-  psi_global = psi_global,
-  V_global = V_global,
-  se_global = se_global,
-  items = EQ_items
-)
+res_shiftcov_EQ <- wald_shiftcov_frailty(psi_global = psi_global,V_global = V_global,se_global = se_global,items = EQ_items)
 
-res_shiftcov_KOOS <- wald_shiftcov_frailty(
-  psi_global = psi_global,
-  V_global = V_global,
-  se_global = se_global,
-  items = KOOS_items
-)
+res_shiftcov_KOOS <- wald_shiftcov_frailty( psi_global = psi_global,V_global = V_global, se_global = se_global, items = KOOS_items)
 
 res_shiftcov_all$W
 res_shiftcov_all$df
@@ -279,9 +204,7 @@ itemnamesEQ   <- c('Mobility','SelfCare','UsualAct','PainDisc','AnxDepr',"Healt"
 itemnamesKOOS <- c('OutBed','PutSocks','UpSit','Bend','Twist','Kneel','Squat')
 
 origEQ   <- c('Mobility','SelfCare','UsualActivities','PainorDiscomfort','Anxietyordepression',"Perceivedcurrenthealthstatus")
-origKOOS <- c('Gettingoutofbed','Puttingonsocks','Gettingupfromsitting',
-              'Bendingtowardthefloor_pickinguponobjectfromtheground',
-              'Twisting_pivotingontheinjuredknee','Kneeling','Squatting')
+origKOOS <- c('Gettingoutofbed','Puttingonsocks','Gettingupfromsitting','Bendingtowardthefloor_pickinguponobjectfromtheground','Twisting_pivotingontheinjuredknee','Kneeling','Squatting')
 
 short_map_base <- setNames(c(itemnamesEQ, itemnamesKOOS), c(origEQ, origKOOS))
 
@@ -335,21 +258,11 @@ Ipostfrail <- plot_corr_circles_lower(
   legend_text_size = 9
 )
 
-I0frail
-Ipostfrail
-
-
 
 rows_I0   <- make_labs_time(est_interest, time = "I0",   include_frailty = FALSE)
 cols_Ipost<- make_labs_time(est_interest, time = "Ipost",include_frailty = FALSE)
 
-cross <- make_cross_RP_from_tab(
-  tab = tab,
-  rows = rows_I0,
-  cols = cols_Ipost,
-  p_col = c("p_fisher","p"),
-  set_oob_to_NA = TRUE
-)
+cross <- make_cross_RP_from_tab(tab = tab,rows = rows_I0,cols = cols_Ipost,p_col = c("p_fisher","p"),set_oob_to_NA = TRUE)
 
 p_cross <- plot_corr_circles_rect(
   R = cross$R,
@@ -388,18 +301,11 @@ p_all <- (I0frail + guides(size = "none", colour = "none") |
 
  
 
-no_y_left <- theme(
-  axis.text.y = element_blank(),
-  axis.ticks.y = element_blank()
-)
+no_y_left <- theme(axis.text.y = element_blank(),axis.ticks.y = element_blank())
 
-no_y_right <- theme(
-  axis.text.y.right  = element_blank(),
-  axis.ticks.y.right = element_blank()
-)
+no_y_right <- theme(axis.text.y.right  = element_blank(),  axis.ticks.y.right = element_blank())
 
-p_all <- (
-  I0frail + guides(size = "none", colour = "none") |
+p_all <- ( I0frail + guides(size = "none", colour = "none") |
     (Ipostfrail + guides(size = "none", colour = "none") + no_y_left) |
     p_cross
 ) +
@@ -413,23 +319,13 @@ dev.off()
 
 labs_resid <- c(origEQ, origKOOS)
 
-R_resid <- corr_resid_matrix_simple(
-  est_interest_adj,
-  base = "corr_resid",
-  sep = "__"
-)
+R_resid <- corr_resid_matrix_simple(est_interest_adj,base = "corr_resid",sep = "__")
 
 labs_resid <- labs_resid[labs_resid %in% rownames(R_resid)]
 R_resid <- R_resid[labs_resid, labs_resid, drop = FALSE]
 R_resid <- 0.5 * (R_resid + t(R_resid))
 
-P_resid <- make_P_resid_from_tab(
-  tab = tab_use,
-  labs = labs_resid,
-  base = "corr_resid",
-  sep = "__",
-  p_col = c("p_fdr", "p_fisher", "p")
-)
+P_resid <- make_P_resid_from_tab(tab = tab_use,labs = labs_resid, base = "corr_resid", sep = "__",p_col = c("p_fdr", "p_fisher", "p"))
 
 p_resid <- plot_corr_circles_lower(
   R = R_resid,
@@ -462,51 +358,20 @@ dev.off()
 itemnamesEQ   <- c("Mobility","SelfCare","UsualAct","PainDisc","AnxDepr","Health")
 itemnamesKOOS <- c('OutBed','PutSocks','UpSit','Bend','Twist','Kneel','Squat')
 
-origEQ_full <- c(
-  "Mobility",
-  "SelfCare",
-  "UsualActivities",
-  "PainorDiscomfort",
-  "Anxietyordepression",
-  "Perceivedcurrenthealthstatus"
-)
+origEQ_full <- c("Mobility", "SelfCare","UsualActivities","PainorDiscomfort","Anxietyordepression","Perceivedcurrenthealthstatus")
 
-origKOOS_full <- c(
-  "Gettingoutofbed",
-  "Puttingonsocks",
-  "Gettingupfromsitting",
-  "Bendingtowardthefloor_pickinguponobjectfromtheground",
-  "Twisting_pivotingontheinjuredknee",
-  "Kneeling",
-  "Squatting"
-)
+origKOOS_full <- c("Gettingoutofbed", "Puttingonsocks","Gettingupfromsitting", "Bendingtowardthefloor_pickinguponobjectfromtheground","Twisting_pivotingontheinjuredknee","Kneeling","Squatting")
 
-short_map_full <- c(
-  setNames(itemnamesEQ, origEQ_full),
-  setNames(itemnamesKOOS, origKOOS_full)
-)
+short_map_full <- c(setNames(itemnamesEQ, origEQ_full),setNames(itemnamesKOOS, origKOOS_full))
 
-cols_main <- c(
-  "EQ-5D_I0"    = "#0F766E",
-  "EQ-5D_Ipost" = "#d1a00d",
-  "KOOS_I0"     = "#5B21B6",
-  "KOOS_Ipost"  = "#52340b",
-  "Frailty"     = "#C2410C"
-)
+cols_main <- c("EQ-5D_I0" = "#0F766E","EQ-5D_Ipost" = "#d1a00d","KOOS_I0" = "#5B21B6", "KOOS_Ipost" = "#52340b", "Frailty" = "#C2410C")
 
-cols_resid <- c(
-  "EQ"   = "grey40",
-  "KOOS" = "#111111"
-)
+cols_resid <- c("EQ" = "grey40", "KOOS" = "#111111")
 
 R_I0 <- Corradj[grepl("I0", rownames(Corradj)), grepl("I0", colnames(Corradj)), drop = FALSE]
 R_Ipost <- Corradj[grepl("Ipost", rownames(Corradj)), grepl("Ipost", colnames(Corradj)), drop = FALSE]
 
-R_resid <- corr_resid_matrix_simple(
-  est_interest_adj,
-  base = "corr_resid",
-  sep = "__"
-)
+R_resid <- corr_resid_matrix_simple(est_interest_adj,base = "corr_resid",sep = "__")
 
 ord_resid <- c(origEQ_full, origKOOS_full)
 ord_resid <- ord_resid[ord_resid %in% rownames(R_resid)]
@@ -618,11 +483,7 @@ p_pca_resid <- pca_plot_grouped(
 )
 
 
-no_y_numbers <- theme(
-  axis.text.y = element_blank(),
-  axis.ticks.y = element_line(color = "black"),
-  axis.ticks.length.y = grid::unit(2.2, "mm")
-)
+no_y_numbers <- theme(axis.text.y = element_blank(),axis.ticks.y = element_line(color = "black"),axis.ticks.length.y = grid::unit(2.2, "mm"))
 
 p_all <- wrap_plots(
   p_full,
@@ -666,13 +527,11 @@ q_map <- list(
   QoL = c("Mobility","SelfCare","UsualActivities","PainorDiscomfort","Anxietyordepression"),
   Mob = c("Gettingoutofbed","Puttingonsocks","Gettingupfromsitting","Bendingtowardthefloor_pickinguponobjectfromtheground","Twisting_pivotingontheinjuredknee","Kneeling","Squatting"))
 
-item_labels <- c(Mobility = "Mobility", SelfCare = "SelfCare", UsualActivities = "UsualAct", PainorDiscomfort = "PainDisc", Anxietyordepression = "AnxDepr",
-  Gettingoutofbed = "OutofBed", Puttingonsocks = "PutSocks", Gettingupfromsitting = "UpSit", Bendingtowardthefloor_pickinguponobjectfromtheground = "Bend",
-  Twisting_pivotingontheinjuredknee = "Twist", Kneeling = "Kneel", Squatting = "Squat")
+item_labels <- c(Mobility = "Mobility", SelfCare = "SelfCare", UsualActivities = "UsualAct", PainorDiscomfort = "PainDisc", Anxietyordepression = "AnxDepr",Gettingoutofbed = "OutofBed", Puttingonsocks = "PutSocks", Gettingupfromsitting = "UpSit", Bendingtowardthefloor_pickinguponobjectfromtheground = "Bend", Twisting_pivotingontheinjuredknee = "Twist", Kneeling = "Kneel", Squatting = "Squat")
 
 
 
-prep <- prep_long_all_items_surv_mixed2( dat = dat, ord_itemnames = itemnames, cont_itemnames = "Perceivedcurrenthealthstatus", cont_transforms = cont_tf, surv_outcome = "failure",  admin_date = "2025-01-01")
+prep = prep_long_all_items_surv_mixed2( dat = dat, ord_itemnames = itemnames, cont_itemnames = "Perceivedcurrenthealthstatus", cont_transforms = cont_tf, surv_outcome = "failure",  admin_date = "2025-01-01")
 
 long_dat <- prep$long
 K_by_item  <- prep$K_by_item
@@ -680,12 +539,10 @@ K_by_item  <- prep$K_by_item
 outcome_info <- data.frame(item = c(itemnames,"Perceivedcurrenthealthstatus"), type = c(rep("ordinal", length(itemnames)),"continuous"), stringsAsFactors = FALSE)
 
 
-itemnames_ord <- c( "Mobility","SelfCare","UsualActivities","PainorDiscomfort","Anxietyordepression",
-  "Gettingoutofbed","Puttingonsocks","Gettingupfromsitting", "Bendingtowardthefloor_pickinguponobjectfromtheground",
-  "Twisting_pivotingontheinjuredknee","Kneeling","Squatting")
+itemnames_ord <- c( "Mobility","SelfCare","UsualActivities","PainorDiscomfort","Anxietyordepression","Gettingoutofbed","Puttingonsocks","Gettingupfromsitting", "Bendingtowardthefloor_pickinguponobjectfromtheground", "Twisting_pivotingontheinjuredknee","Kneeling","Squatting")
 
 
-theta_sampler_global <- make_theta_sampler_global(theta_mean = psi_adj_cov, V_theta = V_global)
+theta_sampler_global = make_theta_sampler_global(theta_mean = psi_adj_cov, V_theta = V_global)
 
 
 
@@ -827,9 +684,7 @@ Sys.setenv(
 n_cores <- 9
 
 tasks <- data.frame(
-  label = c("dm1_0","dm1_6","dm1_12",
-            "dm2_0","dm2_6","dm2_12",
-            "dm3_0","dm3_6","dm3_12"),
+  label = c("dm1_0","dm1_6","dm1_12","dm2_0","dm2_6","dm2_12","dm3_0","dm3_6","dm3_12"),
   obj_name = c("hist_fake1_wide","hist_fake1_wide","hist_fake1_wide",
                "hist_fake2_wide","hist_fake2_wide","hist_fake2_wide",
                "hist_fake3_wide","hist_fake3_wide","hist_fake3_wide"),
@@ -942,23 +797,11 @@ pred_fake3_12 = readRDS("pred_fake3_12_hist.rds")
 
 
 
-histories <- list(
-  FAKE1 = hist_fake1_wide,
-  FAKE2 = hist_fake2_wide,
-  FAKE3 = hist_fake3_wide
-)
+histories <- list(FAKE1 = hist_fake1_wide,FAKE2 = hist_fake2_wide,FAKE3 = hist_fake3_wide)
 
-outs <- list(
-  FAKE1 = as_plot_out_from_fullplug(pred_fake1_12, id = "FAKE1"),
-  FAKE2 = as_plot_out_from_fullplug(pred_fake2_12, id = "FAKE2"),
-  FAKE3 = as_plot_out_from_fullplug(pred_fake3_12, id = "FAKE3")
-)
+outs <- list(FAKE1 = as_plot_out_from_fullplug(pred_fake1_12, id = "FAKE1"),FAKE2 = as_plot_out_from_fullplug(pred_fake2_12, id = "FAKE2"),FAKE3 = as_plot_out_from_fullplug(pred_fake3_12, id = "FAKE3"))
 
-titles <- c(
-  FAKE1 = "(a) poor profile",
-  FAKE2 = "(b) average profile",
-  FAKE3 = "(c) good profile"
-)
+titles <- c(FAKE1 = "(a) poor profile", FAKE2 = "(b) average profile", FAKE3 = "(c) good profile")
 
 
 t0_days <- 0
@@ -966,10 +809,7 @@ t0_x <- 0
 
 q_map$Cont <- "Perceivedcurrenthealthstatus"
 
-item_labels <- c(
-  item_labels,
-  Perceivedcurrenthealthstatus = "Health"
-)
+item_labels <- c(item_labels, Perceivedcurrenthealthstatus = "Health")
 
 
 
