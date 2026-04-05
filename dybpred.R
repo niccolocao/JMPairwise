@@ -22,11 +22,28 @@ prep_long_all_items_surv_mixed2 <- function(
     rehosp_horizon_days = rehosp_horizon_days
   )
   
-  if (is.null(cont_itemnames) || length(cont_itemnames) == 0) return(tmp)
+  if (is.null(cont_itemnames) || length(cont_itemnames) == 0) {
+    if (!"is_cont" %in% names(tmp$long)) tmp$long$is_cont <- 0L
+    return(tmp)
+  }
   
   cont_itemnames <- as.character(cont_itemnames)
+  miss_cont <- setdiff(cont_itemnames, names(dat))
+  if (length(miss_cont)) {
+    stop("mancano queste colonne continue in dat: ", paste(miss_cont, collapse = ", "))
+  }
+  
   if (is.null(cont_transforms)) {
     cont_transforms <- stats::setNames(vector("list", length(cont_itemnames)), cont_itemnames)
+  }
+  if (is.null(names(cont_transforms))) {
+    names(cont_transforms) <- cont_itemnames[seq_along(cont_transforms)]
+  }
+  
+  if (!"is_cont" %in% names(tmp$long)) {
+    tmp$long$is_cont <- 0L
+  } else {
+    tmp$long$is_cont <- ifelse(is.na(tmp$long$is_cont), 0L, as.integer(tmp$long$is_cont))
   }
   
   base_long <- dat %>%
@@ -43,59 +60,86 @@ prep_long_all_items_surv_mixed2 <- function(
       visit_idx = dplyr::row_number() - 1L,
       post = as.integer(visit_idx >= 1L),
       time_post = ifelse(post == 1L, t_within, 0),
-      loghosp = log(1 + hospitalizationdays),
+      loghosp = log1p(hospitalizationdays),
       waiting = as.numeric(difftime(date_intervention, date_baseline, units = "days")) / 30.4375,
-      time_discrete = factor(visit_idx, levels = c(0,1,2), labels = c("t0","t6","t12")),
+      time_discrete = factor(visit_idx, levels = c(0, 1, 2), labels = c("t0", "t6", "t12")),
       I0 = as.integer(time_discrete == "t0"),
       I6 = as.integer(time_discrete == "t6"),
       I12 = as.integer(time_discrete == "t12"),
-      Ipost = I6 + I12
+      Ipost = as.integer(I6 + I12 > 0)
     ) %>%
     dplyr::ungroup()
   
-  for (it in cont_itemnames) {
-    if (!it %in% names(base_long)) stop("manca la colonna continua: ", it)
-    tfun <- cont_transforms[[it]]
-    if (!is.null(tfun)) {
-      base_long[[it]] <- tfun(base_long[[it]])
-    }
+  if ("age" %in% names(base_long) &&
+      !is.null(tmp$age_center) &&
+      !is.null(tmp$age_scale)) {
+    base_long$age <- (as.numeric(base_long$age) - tmp$age_center) / tmp$age_scale
   }
   
-  cont_long <- base_long %>%
-    dplyr::select(
-      ID, visit_idx, I0, I6, I12, Ipost,
-      waiting, loghosp, age, sex01, diag_oa, prost_uni,
-      dplyr::all_of(cont_itemnames)
-    ) %>%
-    tidyr::pivot_longer(
-      cols = dplyr::all_of(cont_itemnames),
-      names_to = "item",
-      values_to = "y"
-    ) %>%
-    dplyr::filter(is.finite(y)) %>%
-    dplyr::mutate(
+  cont_blocks <- lapply(cont_itemnames, function(it) {
+    tfun <- cont_transforms[[it]]
+    
+    y_raw <- base_long[[it]]
+    y_use <- if (is.null(tfun)) y_raw else tfun(y_raw)
+    
+    dplyr::tibble(
+      ID = base_long$ID,
+      visit_idx = base_long$visit_idx,
+      I0 = base_long$I0,
+      I6 = base_long$I6,
+      I12 = base_long$I12,
+      Ipost = base_long$Ipost,
+      waiting = base_long$waiting,
+      loghosp = base_long$loghosp,
+      age = base_long$age,
+      sex01 = base_long$sex01,
+      diag_oa = base_long$diag_oa,
+      prost_uni = base_long$prost_uni,
+      item = it,
+      y_raw = as.numeric(y_raw),
       type = 0L,
       time = dplyr::case_when(
-        visit_idx == 0 ~ 0L,
-        visit_idx == 1 ~ 1L,
-        visit_idx == 2 ~ 2L,
+        base_long$visit_idx == 0L ~ 0L,
+        base_long$visit_idx == 1L ~ 1L,
+        base_long$visit_idx == 2L ~ 2L,
         TRUE ~ NA_integer_
       ),
-      item = factor(item, levels = c(ord_itemnames, cont_itemnames, "SURV")),
-      wI6 = waiting * I6,
-      wI12 = waiting * I12,
-      hIpost = dplyr::if_else(time > 0L, loghosp, 0),
-      pI6 = prost_uni * I6,
-      pI12 = prost_uni * I12,
-      z1I0 = ifelse(I0 == 1L, 1L, 0L),
-      z1Ipost = ifelse(Ipost == 1L, 1L, 0L),
+      wI6 = base_long$waiting * base_long$I6,
+      wI12 = base_long$waiting * base_long$I12,
+      hIpost = ifelse(base_long$Ipost == 1L, base_long$loghosp, 0),
+      pI6 = base_long$prost_uni * base_long$I6,
+      pI12 = base_long$prost_uni * base_long$I12,
+      z1I0 = ifelse(base_long$I0 == 1L, 1L, 0L),
+      z1Ipost = ifelse(base_long$Ipost == 1L, 1L, 0L),
+      y = as.numeric(y_use),
       start = NA_real_,
       stop = NA_real_,
-      status = NA_integer_
-    )
+      status = NA_integer_,
+      loghosp_post = base_long$loghosp * base_long$Ipost,
+      is_ord = 0L,
+      is_surv = 0L,
+      is_cont = 1L,
+      z2 = 0L,
+      K_item = NA_integer_,
+      is_K3 = 0L,
+      is_K5 = 0L
+    ) %>%
+      dplyr::filter(!is.na(y), is.finite(y))
+  })
   
-  long2 <- dplyr::bind_rows(tmp$long, cont_long) %>%
-    dplyr::arrange(ID, type, visit_idx, item)
+  cont_long <- dplyr::bind_rows(cont_blocks)
+  
+  long2 <- dplyr::bind_rows(tmp$long, cont_long)
+  
+  long2$item <- factor(
+    as.character(long2$item),
+    levels = c(ord_itemnames, cont_itemnames, "SURV")
+  )
+  
+  long2$is_cont <- ifelse(is.na(long2$is_cont), 0L, as.integer(long2$is_cont))
+  
+  long2 <- long2 %>%
+    dplyr::arrange(ID, is_surv, visit_idx, item)
   
   long2$row_id <- seq_len(nrow(long2))
   long2$Y <- cbind(
@@ -361,10 +405,15 @@ prep_long_all_items_surv <- function(dat,
 
 
 
+
+
+
+
 sanitize_name <- function(x) {
   x <- gsub("\\s+", "_", x)
   gsub("[^[:alnum:]_]+", "", x)
 }
+
 make_fullplug_object <- function(est,
                                  D,
                                  K_map,
@@ -372,9 +421,11 @@ make_fullplug_object <- function(est,
                                  cont_items = NULL,
                                  resid_corr = NULL,
                                  cont_scale = NULL,
+                                 cont_transforms = NULL,
                                  time_unit = "months",
-                                 theta_sampler = NULL) {
-
+                                 theta_sampler = NULL,
+                                 covariate_transforms = NULL) {
+  
   if (is.null(names(est))) stop("est deve avere names().")
   if (is.null(rownames(D)) || is.null(colnames(D))) stop("D deve avere rownames/colnames.")
   
@@ -386,6 +437,10 @@ make_fullplug_object <- function(est,
   ord_items <- as.character(ord_items)
   cont_items <- if (is.null(cont_items)) character(0) else as.character(cont_items)
   all_items <- c(ord_items, cont_items)
+  
+  if (is.null(cont_transforms)) {
+    cont_transforms <- setNames(vector("list", length(cont_items)), cont_items)
+  }
   
   get_surv_par <- function(name_plain, name_log, transform = exp) {
     if (name_plain %in% names(est)) return(unname(est[[name_plain]]))
@@ -470,6 +525,7 @@ make_fullplug_object <- function(est,
       thresholds = build_thresholds(item_s, K_map[[item]]),
       sigma = 1,
       scale_div = 1,
+      transform = NULL,
       re_names = c(paste0(item_s, "_I0"), paste0(item_s, "_Ipost"))
     )
   }
@@ -477,6 +533,7 @@ make_fullplug_object <- function(est,
   for (item in cont_items) {
     item_s <- sanitize_name(item)
     sc <- if (is.null(cont_scale)) 1 else if (item %in% names(cont_scale)) cont_scale[[item]] else 1
+    tf <- if (item %in% names(cont_transforms)) cont_transforms[[item]] else NULL
     outcomes[[item_s]] <- list(
       name = item_s,
       original_name = item,
@@ -485,6 +542,7 @@ make_fullplug_object <- function(est,
       thresholds = NULL,
       sigma = build_sigma_item(item_s),
       scale_div = sc,
+      transform = tf,
       re_names = c(paste0(item_s, "_I0"), paste0(item_s, "_Ipost"))
     )
   }
@@ -510,18 +568,13 @@ make_fullplug_object <- function(est,
       frailty_name = "frailty"
     ),
     theta_sampler = theta_sampler,
-    time_unit = time_unit
+    time_unit = time_unit,
+    covariate_transforms = covariate_transforms
   )
 }
 
-cont_tf <- list(
-  Perceivedcurrenthealthstatus = function(x) {
-    y <- x / 100
-    pmin(pmax(y, 0), 1 - 1e-12)
-  }
-)
-
 prep_newdata_fullplug <- function(newdata,
+                                  object = NULL,
                                   idVar = "ID",
                                   timeVar = "visit_m",
                                   visit_idx_var = "visit_idx") {
@@ -584,6 +637,15 @@ prep_newdata_fullplug <- function(newdata,
   if (!"pI12" %in% names(out)) {
     if (!"prost_uni" %in% names(out)) stop("manca 'prost_uni', quindi non posso costruire pI12.")
     out$pI12 <- out$prost_uni * out$I12
+  }
+  
+  if (!is.null(object) && !is.null(object$covariate_transforms)) {
+    for (nm in names(object$covariate_transforms)) {
+      tfun <- object$covariate_transforms[[nm]]
+      if (!is.null(tfun) && nm %in% names(out)) {
+        out[[nm]] <- tfun(out[[nm]])
+      }
+    }
   }
   
   out <- out[order(out[[idVar]], out[[timeVar]]), , drop = FALSE]
@@ -661,7 +723,11 @@ prep_newdata_fullplug <- function(newdata,
     if (is.na(yy)) next
     
     if (ok$type == "gaussian") {
-      yy <- as.numeric(yy) / ok$scale_div
+      if (!is.null(ok$transform)) {
+        yy <- ok$transform(as.numeric(yy))
+      } else {
+        yy <- as.numeric(yy) / ok$scale_div
+      }
     } else {
       yy <- as.integer(yy)
     }
@@ -942,81 +1008,173 @@ pair_raw_to_psi_exact <- function(theta_pair_pref) {
   chol_names <- grep("::(log_chol_var_|chol_cov_)", names(theta_pair_pref), value = TRUE)
   nonchol_names <- setdiff(names(theta_pair_pref), chol_names)
   
-  if (!length(chol_names)) {
-    return(theta_pair_pref)
-  }
+  out <- theta_pair_pref[nonchol_names]
   
-  tag <- sub("::.*$", "", chol_names[1])
-  
-  vc <- chol_named_to_varcov(
-    chol_vec = theta_pair_pref[chol_names],
-    chol_names_prefixed = chol_names
-  )
-  
-  vc <- setNames(as.numeric(vc), paste0(tag, "::", names(vc)))
-  
-  c(theta_pair_pref[nonchol_names], vc)
-}
-make_theta_sampler_global <- function(theta_mean, V_theta) {
-  if (is.null(names(theta_mean))) stop("theta_mean deve avere names().")
-  
-  V_theta <- as.matrix(V_theta)
-  if (is.null(colnames(V_theta)) || is.null(rownames(V_theta))) {
-    stop("V_theta deve avere rownames e colnames.")
-  }
-  
-  if (!setequal(rownames(V_theta), colnames(V_theta))) {
-    stop("rownames(V_theta) e colnames(V_theta) non coincidono come insieme.")
-  }
-  
-  V_theta <- V_theta[colnames(V_theta), colnames(V_theta), drop = FALSE]
-  
-  if (!setequal(names(theta_mean), colnames(V_theta))) {
-    miss1 <- setdiff(names(theta_mean), colnames(V_theta))
-    miss2 <- setdiff(colnames(V_theta), names(theta_mean))
-    stop(
-      "nomi incompatibili tra theta_mean e V_theta.\n",
-      "in theta_mean ma non in V_theta: ", paste(head(miss1, 20), collapse = ", "), "\n",
-      "in V_theta ma non in theta_mean: ", paste(head(miss2, 20), collapse = ", ")
+  if (length(chol_names)) {
+    tag <- sub("::.*$", "", chol_names[1])
+    
+    vc <- chol_named_to_varcov(
+      chol_vec = theta_pair_pref[chol_names],
+      chol_names_prefixed = chol_names
     )
+    
+    vc <- setNames(as.numeric(vc), paste0(tag, "::", names(vc)))
+    out <- c(out, vc)
   }
   
-  theta_mean <- theta_mean[colnames(V_theta)]
-  
-  stopifnot(identical(names(theta_mean), colnames(V_theta)))
-  
-  list(
-    type = "global",
-    theta_mean = theta_mean,
-    V_theta = V_theta
-  )
+  out
 }
 
+.pair_rel_diff <- function(A, B, eps = 1e-12) {
+  A <- as.matrix(A)
+  B <- as.matrix(B)
+  num <- sqrt(sum((A - B)^2, na.rm = TRUE))
+  den <- max(sqrt(sum(B^2, na.rm = TRUE)), eps)
+  num / den
+}
 
-pair_raw_to_psi_exact <- function(theta_pair_pref) {
-  stopifnot(!is.null(names(theta_pair_pref)))
+.pair_fill_D_in_psi <- function(psi, D, D_names) {
+  D <- D[D_names, D_names, drop = FALSE]
   
-  chol_names <- grep("::(log_chol_var_|chol_cov_)", names(theta_pair_pref), value = TRUE)
-  nonchol_names <- setdiff(names(theta_pair_pref), chol_names)
-  
-  if (!length(chol_names)) {
-    return(theta_pair_pref)
+  for (nm in D_names) {
+    vn <- paste0("var_", nm)
+    if (vn %in% names(psi)) psi[[vn]] <- D[nm, nm]
   }
   
-  tag <- sub("::.*$", "", chol_names[1])
+  cov_names <- grep("^cov_", names(psi), value = TRUE)
+  for (cn in cov_names) {
+    ss <- sub("^cov_", "", cn)
+    sp <- strsplit(ss, "__", fixed = TRUE)[[1]]
+    if (length(sp) != 2L) next
+    a <- sp[1]
+    b <- sp[2]
+    if (a %in% D_names && b %in% D_names) {
+      psi[[cn]] <- D[a, b]
+    }
+  }
   
-  vc <- chol_named_to_varcov(
-    chol_vec = theta_pair_pref[chol_names],
-    chol_names_prefixed = chol_names
+  psi
+}
+
+.pair_fill_R_in_psi <- function(psi, R, outcome_names) {
+  R <- R[outcome_names, outcome_names, drop = FALSE]
+  
+  nm_atanh <- grep("^atanh_rho_resid__", names(psi), value = TRUE)
+  for (nm in nm_atanh) {
+    ss <- sub("^atanh_rho_resid__+", "", nm)
+    sp <- strsplit(ss, "__", fixed = TRUE)[[1]]
+    if (length(sp) == 2L && all(sp %in% outcome_names)) {
+      rr <- R[sp[1], sp[2]]
+      psi[[nm]] <- atanh(pmin(pmax(rr, -0.999999), 0.999999))
+    }
+  }
+  
+  nm_corr <- grep("^corr_resid__", names(psi), value = TRUE)
+  for (nm in nm_corr) {
+    ss <- sub("^corr_resid__+", "", nm)
+    sp <- strsplit(ss, "__", fixed = TRUE)[[1]]
+    if (length(sp) == 2L && all(sp %in% outcome_names)) {
+      psi[[nm]] <- R[sp[1], sp[2]]
+    }
+  }
+  
+  psi
+}
+
+.pair_correct_draw <- function(object, psi_draw) {
+  out <- list(
+    psi_use = psi_draw,
+    corrected_D = FALSE,
+    corrected_R = FALSE,
+    D_max_abs = NA_real_,
+    D_rel = NA_real_,
+    R_max_abs = NA_real_,
+    R_rel = NA_real_
   )
   
-  vc <- setNames(as.numeric(vc), paste0(tag, "::", names(vc)))
+  if (any(!is.finite(psi_draw))) {
+    stop("psi_draw contiene valori non finiti.")
+  }
   
-  c(theta_pair_pref[nonchol_names], vc)
+  D_raw <- theta_to_D(psi_draw, rownames(object$D))
+  if (any(!is.finite(D_raw))) stop("D_raw contiene valori non finiti.")
+  
+  D_fix <- project_spd(D_raw)
+  out$D_max_abs <- max(abs(D_fix - D_raw), na.rm = TRUE)
+  out$D_rel <- .pair_rel_diff(D_fix, D_raw)
+  
+  if (out$D_max_abs > 0) {
+    out$corrected_D <- TRUE
+    out$psi_use <- .pair_fill_D_in_psi(out$psi_use, D_fix, rownames(object$D))
+  }
+  
+  R_raw <- theta_to_R(out$psi_use, names(object$outcomes))
+  if (any(!is.finite(R_raw))) stop("R_raw contiene valori non finiti.")
+  
+  R_fix <- project_corr(R_raw)
+  out$R_max_abs <- max(abs(R_fix - R_raw), na.rm = TRUE)
+  out$R_rel <- .pair_rel_diff(R_fix, R_raw)
+  
+  if (out$R_max_abs > 0) {
+    out$corrected_R <- TRUE
+    out$psi_use <- .pair_fill_R_in_psi(out$psi_use, R_fix, names(object$outcomes))
+  }
+  
+  out
 }
+
+psi_to_D <- function(psi_draw, D_names) { 
+  D <- matrix(0, length(D_names), length(D_names), dimnames = list(D_names, D_names))
+  for (nm in D_names) { 
+    vn <- paste0("var_", nm) 
+    if (!vn %in% names(psi_draw)) stop("manca ", vn)
+    D[nm, nm] <- psi_draw[[vn]] 
+  } 
+  cov_names <- grep("^cov_", names(psi_draw), value = TRUE) 
+  for (cn in cov_names) { 
+    ss <- sub("^cov_", "", cn) 
+    sp <- strsplit(ss, "__", fixed = TRUE)[[1]] 
+    if (length(sp) != 2L) next 
+    a <- sp[1]
+    b <- sp[2] 
+    if (a %in% D_names && b %in% D_names) { 
+      D[a, b] <- psi_draw[[cn]] 
+      D[b, a] <- psi_draw[[cn]] } 
+  } 
+  local({Df <- project_spd(D); 
+    if (max(abs(D - Df), na.rm = TRUE) > 1e-10) message("iter ", getOption("fullplug_iter"), ": corrected D"); Df}) 
+} 
+
+psi_to_R <- function(psi_draw, outcome_names) { 
+  R <- diag(1, length(outcome_names)) 
+  dimnames(R) <- list(outcome_names, outcome_names) 
+  nm_atanh <- grep("^atanh_rho_resid__", names(psi_draw), value = TRUE) 
+  for (nm in nm_atanh) { 
+    ss <- sub("^atanh_rho_resid__+", "", nm) 
+    sp <- strsplit(ss, "__", fixed = TRUE)[[1]] 
+    if (length(sp) == 2L && all(sp %in% outcome_names)) { 
+      rr <- tanh(psi_draw[[nm]]) 
+      R[sp[1], sp[2]] <- rr
+      R[sp[2], sp[1]] <- rr
+      } 
+  } 
+  nm_corr <- grep("^corr_resid__", names(psi_draw), value = TRUE) 
+  for (nm in nm_corr) { 
+    ss <- sub("^corr_resid__+", "", nm) 
+    sp <- strsplit(ss, "__", fixed = TRUE)[[1]] 
+    if (length(sp) == 2L && all(sp %in% outcome_names)) {
+      R[sp[1], sp[2]] <- psi_draw[[nm]] 
+      R[sp[2], sp[1]] <- psi_draw[[nm]] 
+    } 
+  } 
+  local({Rf <- project_corr(R); if (max(abs(R - Rf), na.rm = TRUE) > 1e-10) message("iter ", getOption("fullplug_iter"), ": corrected R"); Rf}) 
+  
+  }
+
 make_theta_sampler_pairwise_raw <- function(ex_pref_for_jk,
                                             V_theta_raw,
-                                            canonicalizer = canonicalizer_all) {
+                                            canonicalizer = canonicalizer_all,
+                                            verbose = TRUE) {
   theta_blocks <- unname(lapply(ex_pref_for_jk, function(ex) {
     th <- ex$pars[colnames(ex$H)]
     stopifnot(identical(names(th), colnames(ex$H)))
@@ -1049,7 +1207,6 @@ make_theta_sampler_pairwise_raw <- function(ex_pref_for_jk,
   theta_raw_mean <- theta_raw_mean[colnames(V_theta_raw)]
   stopifnot(identical(names(theta_raw_mean), colnames(V_theta_raw)))
   
-  # trasformazione mean raw -> mean psi_all
   psi_blocks_mean <- unname(lapply(theta_blocks, pair_raw_to_psi_exact))
   psi_all_mean <- unlist(psi_blocks_mean, use.names = TRUE)
   
@@ -1069,7 +1226,6 @@ make_theta_sampler_pairwise_raw <- function(ex_pref_for_jk,
     )
   }
   
-  # indici per ricostruire i blocchi pairwise dopo il draw raw
   block_lengths <- vapply(theta_blocks, length, integer(1))
   block_ends <- cumsum(block_lengths)
   block_starts <- c(1L, head(block_ends, -1L) + 1L)
@@ -1103,171 +1259,79 @@ make_theta_sampler_pairwise_raw <- function(ex_pref_for_jk,
     psi_global_draw
   }
   
+  psi_global_mean <- as.numeric(A_all %*% psi_all_mean)
+  names(psi_global_mean) <- rownames(A_all)
+  
   list(
     type = "pairwise_raw",
     theta_mean = theta_raw_mean,
-    V_theta = V_theta_raw,
+    V_theta = ensure_sym_pd(V_theta_raw),
     A_all = A_all,
-    draw_to_global = draw_to_global
+    psi_global_mean = psi_global_mean,
+    draw_to_global = draw_to_global,
+    verbose = verbose
   )
 }
 
-project_spd <- function(S, eps = 1e-8) {
-  S <- 0.5 * (S + t(S))
-  ee <- eigen(S, symmetric = TRUE)
-  ee$values[ee$values < eps] <- eps
-  out <- ee$vectors %*% diag(ee$values, nrow = length(ee$values)) %*% t(ee$vectors)
-  dimnames(out) <- dimnames(S)
-  out
-}
-
-project_corr <- function(R) {
-  R <- as.matrix(R)
-  R <- 0.5 * (R + t(R))
-  diag(R) <- 1
-  off <- row(R) != col(R)
-  R[off] <- pmin(pmax(R[off], -0.999), 0.999)
-  out <- as.matrix(Matrix::nearPD(R, corr = TRUE, keepDiag = TRUE)$mat)
-  out <- 0.5 * (out + t(out))
-  diag(out) <- 1
-  dimnames(out) <- dimnames(R)
-  out
-}
-
-repair_thresholds <- function(x, eps = 1e-4) {
-  x <- sort(as.numeric(x))
-  if (length(x) <= 1L) return(x)
-  for (j in 2:length(x)) {
-    if (x[j] <= x[j - 1] + eps) x[j] <- x[j - 1] + eps
-  }
-  x
-}
-
-psi_to_D <- function(psi_draw, D_names) {
-  D <- matrix(0, length(D_names), length(D_names), dimnames = list(D_names, D_names))
-
-  for (nm in D_names) {
-    vn <- paste0("var_", nm)
-    if (!vn %in% names(psi_draw)) stop("manca ", vn)
-    D[nm, nm] <- psi_draw[[vn]]
-  }
-
-  cov_names <- grep("^cov_", names(psi_draw), value = TRUE)
-  for (cn in cov_names) {
-    ss <- sub("^cov_", "", cn)
-    sp <- strsplit(ss, "__", fixed = TRUE)[[1]]
-    if (length(sp) != 2L) next
-    a <- sp[1]
-    b <- sp[2]
-    if (a %in% D_names && b %in% D_names) {
-      D[a, b] <- psi_draw[[cn]]
-      D[b, a] <- psi_draw[[cn]]
-    }
-  }
-
-  project_spd(D)
-}
-
-psi_to_R <- function(psi_draw, outcome_names) {
-  R <- diag(1, length(outcome_names))
-  dimnames(R) <- list(outcome_names, outcome_names)
-
-  nm_atanh <- grep("^atanh_rho_resid__", names(psi_draw), value = TRUE)
-  for (nm in nm_atanh) {
-    ss <- sub("^atanh_rho_resid__+", "", nm)
-    sp <- strsplit(ss, "__", fixed = TRUE)[[1]]
-    if (length(sp) == 2L && all(sp %in% outcome_names)) {
-      rr <- tanh(psi_draw[[nm]])
-      R[sp[1], sp[2]] <- rr
-      R[sp[2], sp[1]] <- rr
-    }
-  }
-
-  nm_corr <- grep("^corr_resid__", names(psi_draw), value = TRUE)
-  for (nm in nm_corr) {
-    ss <- sub("^corr_resid__+", "", nm)
-    sp <- strsplit(ss, "__", fixed = TRUE)[[1]]
-    if (length(sp) == 2L && all(sp %in% outcome_names)) {
-      R[sp[1], sp[2]] <- psi_draw[[nm]]
-      R[sp[2], sp[1]] <- psi_draw[[nm]]
-    }
-  }
-
-  project_corr(R)
-}
-
 apply_psi_draw_to_object <- function(object, psi_draw) {
-  obj <- object
-  
-  for (nm in names(obj$outcomes)) {
+  obj <- object 
+  for (nm in names(obj$outcomes)) { 
     ok <- obj$outcomes[[nm]]
-    
-    pat_beta <- paste0("^fixed_", nm, "_")
-    ii_beta <- grep(pat_beta, names(psi_draw))
-    if (length(ii_beta)) {
-      vv <- psi_draw[ii_beta]
-      nvv <- sub(pat_beta, "", names(vv))
-      nvv[nvv == "Intercept"] <- "(Intercept)"
-      names(vv) <- nvv
-      obj$outcomes[[nm]]$beta <- vv
-    }
-    
-    if (ok$type == "ordinal") {
-      pat_thr <- paste0("^threshold_", nm, "_cut:")
-      ii_thr <- grep(pat_thr, names(psi_draw))
-      if (length(ii_thr)) {
-        vv <- psi_draw[ii_thr]
-        idx <- as.integer(sub(pat_thr, "", names(vv)))
-        vv <- vv[order(idx)]
+    pat_beta <- paste0("^fixed_", nm, "_") 
+    ii_beta <- grep(pat_beta, names(psi_draw)) 
+    if (length(ii_beta)) { 
+      vv <- psi_draw[ii_beta] 
+      nvv <- sub(pat_beta, "", names(vv)) 
+      nvv[nvv == "Intercept"] <- "(Intercept)" 
+      names(vv) <- nvv 
+      obj$outcomes[[nm]]$beta <- vv 
+    } 
+    if (ok$type == "ordinal") { 
+      pat_thr <- paste0("^threshold_", nm, "_cut:") 
+      ii_thr <- grep(pat_thr, names(psi_draw)) 
+      if (length(ii_thr)) { 
+        vv <- psi_draw[ii_thr] 
+        idx <- as.integer(sub(pat_thr, "", names(vv))) 
+        vv <- vv[order(idx)] 
         obj$outcomes[[nm]]$thresholds <- repair_thresholds(vv)
-      }
-    }
-    
+        } 
+    } 
     if (ok$type == "gaussian") {
-      nm_logsig <- paste0("log_sigma_", nm)
-      nm_sig <- paste0("sigma_", nm)
-      if (nm_logsig %in% names(psi_draw)) {
-        obj$outcomes[[nm]]$sigma <- exp(psi_draw[[nm_logsig]])
-      } else if (nm_sig %in% names(psi_draw)) {
-        obj$outcomes[[nm]]$sigma <- max(psi_draw[[nm_sig]], 1e-8)
-      }
-    }
-  }
-  
+        nm_logsig <- paste0("log_sigma_", nm) 
+        nm_sig <- paste0("sigma_", nm) 
+        if (nm_logsig %in% names(psi_draw)) { 
+          obj$outcomes[[nm]]$sigma <- exp(psi_draw[[nm_logsig]]) 
+        } else if (nm_sig %in% names(psi_draw)) {
+            obj$outcomes[[nm]]$sigma <- max(psi_draw[[nm_sig]], 1e-8)
+        } 
+    } 
+  } 
   ii_surv <- grep("^fixed_surv_", names(psi_draw))
-  if (length(ii_surv)) {
+  if (length(ii_surv)) { 
     vv <- psi_draw[ii_surv]
-    names(vv) <- sub("^fixed_surv_", "", names(vv))
-    obj$survival$beta <- vv
-  }
-  
-  if ("log_lambda" %in% names(psi_draw)) {
-    obj$survival$lambda <- exp(psi_draw[["log_lambda"]])
+    names(vv) <- sub("^fixed_surv_", "", names(vv)) 
+    obj$survival$beta <- vv 
+    } 
+  if ("log_lambda" %in% names(psi_draw)) { 
+      obj$survival$lambda <- exp(psi_draw[["log_lambda"]]) 
   } else if ("lambda" %in% names(psi_draw)) {
-    obj$survival$lambda <- max(psi_draw[["lambda"]], 1e-8)
-  }
-  
+        obj$survival$lambda <- max(psi_draw[["lambda"]], 1e-8) 
+  } 
   if ("log_rho" %in% names(psi_draw)) {
-    obj$survival$rho <- exp(psi_draw[["log_rho"]])
+    obj$survival$rho <- exp(psi_draw[["log_rho"]]) 
   } else if ("rho" %in% names(psi_draw)) {
-    obj$survival$rho <- max(psi_draw[["rho"]], 1e-8)
-  }
-  
-  obj$D <- ensure_sym_pd(psi_to_D(psi_draw, rownames(obj$D)))
-  obj$resid_corr <- project_corr(psi_to_R(psi_draw, names(obj$outcomes)))
-  
-  obj
-}
+      obj$survival$rho <- max(psi_draw[["rho"]], 1e-8) 
+  } 
+  obj$D <- psi_to_D(psi_draw, rownames(obj$D))
+  obj$resid_corr <- project_corr(psi_to_R(psi_draw, names(obj$outcomes))) 
+  obj 
+} 
 
-draw_theta_global <- function(theta_sampler) {
-  th <- as.numeric(MASS::mvrnorm(
-    1,
-    mu = theta_sampler$theta_mean,
-    Sigma = theta_sampler$V_theta
-  ))
-  names(th) <- names(theta_sampler$theta_mean)
-  th
-}
+draw_theta_global <- function(theta_sampler) { 
+  th <- as.numeric(MASS::mvrnorm( 1, mu = theta_sampler$theta_mean, Sigma = theta_sampler$V_theta )) 
+  names(th) <- names(theta_sampler$theta_mean) 
+  th }
+
 
 draw_theta_pairwise_raw <- function(theta_sampler) {
   th <- as.numeric(MASS::mvrnorm(
@@ -1281,6 +1345,7 @@ draw_theta_pairwise_raw <- function(theta_sampler) {
 
 draw_theta_fullplug <- function(object, theta_source = c("global", "pairwise_raw")) {
   theta_source <- match.arg(theta_source)
+  options(fullplug_iter = getOption("fullplug_iter", 0L) + 1L)
   
   sampler <- object$theta_sampler
   if (is.null(sampler)) stop("object$theta_sampler mancante.")
@@ -1291,7 +1356,7 @@ draw_theta_fullplug <- function(object, theta_source = c("global", "pairwise_raw
     theta_draw <- as.numeric(MASS::mvrnorm(
       1,
       mu = sampler$theta_mean,
-      Sigma = sampler$V_theta
+      Sigma = ensure_sym_pd(sampler$V_theta)
     ))
     names(theta_draw) <- names(sampler$theta_mean)
     
@@ -1301,22 +1366,51 @@ draw_theta_fullplug <- function(object, theta_source = c("global", "pairwise_raw
   if (theta_source == "pairwise_raw") {
     if (sampler$type != "pairwise_raw") stop("theta_sampler non è di tipo 'pairwise_raw'.")
     
+    draw_id <- getOption("fullplug_iter")
+    
     theta_raw_draw <- as.numeric(MASS::mvrnorm(
       1,
       mu = sampler$theta_mean,
-      Sigma = sampler$V_theta
+      Sigma = ensure_sym_pd(sampler$V_theta)
     ))
     names(theta_raw_draw) <- names(sampler$theta_mean)
     
     psi_global_draw <- sampler$draw_to_global(theta_raw_draw)
-    return(apply_psi_draw_to_object(object, psi_global_draw))
+    chk <- .pair_correct_draw(object, psi_global_draw)
+    
+    if (isTRUE(sampler$verbose)) {
+      cat(sprintf(
+        "draw %d ACCEPTED corrected_D=%s corrected_R=%s D[max=%.3e rel=%.3e] R[max=%.3e rel=%.3e]\n",
+        draw_id,
+        ifelse(chk$corrected_D, "yes", "no"),
+        ifelse(chk$corrected_R, "yes", "no"),
+        chk$D_max_abs, chk$D_rel,
+        chk$R_max_abs, chk$R_rel
+      ))
+    }
+    
+    return(apply_psi_draw_to_object(object, chk$psi_use))
   }
   
   stop("theta_source non riconosciuto.")
 }
 
-
-
+sanitize_proposal_Sigma <- function(S, eps = 1e-6, max_var = 10) {
+  S <- as.matrix(S)
+  storage.mode(S) <- "double"
+  S <- 0.5 * (S + t(S))
+  
+  ee <- eigen(S, symmetric = TRUE)
+  vals <- ee$values
+  vals[!is.finite(vals)] <- eps
+  vals[vals < eps] <- eps
+  vals[vals > max_var] <- max_var
+  
+  S2 <- ee$vectors %*% diag(vals, nrow = length(vals)) %*% t(ee$vectors)
+  S2 <- 0.5 * (S2 + t(S2))
+  dimnames(S2) <- dimnames(S)
+  S2
+}
 
 
 make_fake_hist_wide <- function(id,
@@ -1666,7 +1760,12 @@ survfitJM_fullplug <- function(object,
   if (!is.null(seed))
     set.seed(seed)
   
-  newdata <- prep_newdata_fullplug(newdata, idVar = idVar, timeVar = timeVar)
+  newdata <- prep_newdata_fullplug(
+    newdata,
+    object = object,
+    idVar = idVar,
+    timeVar = timeVar
+  )
   
   id_chr0 <- as.character(newdata[[idVar]])
   id <- id. <- match(id_chr0, unique(id_chr0))
@@ -1750,7 +1849,11 @@ survfitJM_fullplug <- function(object,
     }
     
     modes.b[i, ] <- fit_i$mode
-    Vars.b[[i]] <- fit_i$var
+    Vars.b[[i]] <- sanitize_proposal_Sigma(
+      fit_i$var,
+      eps = 1e-6,
+      max_var = 10
+    )
   }
   
   if (!simulate) {
@@ -1786,15 +1889,15 @@ survfitJM_fullplug <- function(object,
     
     for (m in seq_len(M)) {
       object_m <- draw_theta_fullplug(object, theta_source = theta_source)
-      
       SS <- vector("list", n_id)
       
       for (i in seq_len(n_id)) {
-        Sigma_i <- 0.5 * (Vars.b[[i]] + t(Vars.b[[i]]))
+        mu_i <- as.numeric(modes.b[i, ])
+        Sigma_i <- Vars.b[[i]]
         
-        proposed.b <- rmvt(1, modes.b[i, ], Sigma_i, 4)
-        dmvt.old <- dmvt(b.old[i, ], modes.b[i, ], Sigma_i, 4, TRUE)
-        dmvt.proposed <- dmvt(proposed.b, modes.b[i, ], Sigma_i, 4, TRUE)
+        proposed.b <- as.numeric(rmvt(1, mu = mu_i, Sigma = Sigma_i, df = 4))
+        dmvt.old <- dmvt(as.numeric(b.old[i, ]), mu = mu_i, Sigma = Sigma_i, df = 4, log = TRUE)
+        dmvt.proposed <- dmvt(proposed.b, mu = mu_i, Sigma = Sigma_i, df = 4, log = TRUE)
         
         loga <- .fullplug_logpost_b(
           proposed.b,
@@ -1805,7 +1908,7 @@ survfitJM_fullplug <- function(object,
           pmvnorm_control = pmvnorm_control
         ) + dmvt.old -
           .fullplug_logpost_b(
-            b.old[i, ],
+            as.numeric(b.old[i, ]),
             object = object_m,
             df_i = split_data[[i]],
             t_cut = last.time[i],
@@ -1814,7 +1917,6 @@ survfitJM_fullplug <- function(object,
           ) - dmvt.proposed
         
         a <- if (is.finite(loga)) min(exp(loga), 1) else NA_real_
-        
         ind <- !is.na(a) && (runif(1) <= a)
         success.rate[m, i] <- ind
         
@@ -1823,7 +1925,7 @@ survfitJM_fullplug <- function(object,
         
         row0 <- split_data[[i]][1, , drop = FALSE]
         tp <- times.to.pred[[i]]
-        b_i <- setNames(b.new[i, ], rownames(object_m$D))
+        b_i <- setNames(as.numeric(b.new[i, ]), rownames(object_m$D))
         
         S.pred <- numeric(length(tp))
         for (l in seq_along(S.pred)) {
@@ -1885,13 +1987,32 @@ survfitJM_fullplug <- function(object,
   if (simulate) {
     out_res$full.results <- out
     out_res$success.rate <- success.rate
-    rm(list = ".Random.seed", envir = globalenv())
+    
   }
   
   class(out_res) <- "survfitJM_fullplug"
   out_res
 }
 
+
+make_theta_sampler_global <- function(theta_mean, V_theta) { 
+  if (is.null(names(theta_mean))) stop("theta_mean deve avere names().") 
+  V_theta <- as.matrix(V_theta) 
+  if (is.null(colnames(V_theta)) || is.null(rownames(V_theta))) {
+    stop("V_theta deve avere rownames e colnames.") } 
+  if (!setequal(rownames(V_theta), colnames(V_theta))) { 
+    stop("rownames(V_theta) e colnames(V_theta) non coincidono come insieme.") } 
+  V_theta <- V_theta[colnames(V_theta), colnames(V_theta), drop = FALSE] 
+  if (!setequal(names(theta_mean), colnames(V_theta))) { 
+    miss1 <- setdiff(names(theta_mean), colnames(V_theta)) 
+    miss2 <- setdiff(colnames(V_theta), names(theta_mean)) 
+    stop( "nomi incompatibili tra theta_mean e V_theta.\n", "in theta_mean ma non in V_theta: ", 
+          paste(head(miss1, 20), collapse = ", "), "\n", "in V_theta ma non in theta_mean: ",
+          paste(head(miss2, 20), collapse = ", ") ) }
+  theta_mean <- theta_mean[colnames(V_theta)] 
+  stopifnot(identical(names(theta_mean), colnames(V_theta))) 
+  list( type = "global", theta_mean = theta_mean, V_theta = V_theta ) 
+  }
 
 .check_H_for_proposal <- function(H, tol = 1e-08) {
   Hs <- 0.5 * (H + t(H))
@@ -2040,3 +2161,363 @@ as_plot_out_from_fullplug <- function(pred, id = NULL) {
     )
   )
 }
+
+
+.make_starts_b_fullplug <- function(q,
+                                    D = NULL,
+                                    n_start = 12,
+                                    seed = NULL,
+                                    sd_small = 0.15,
+                                    sd_big = 0.50) {
+  if (!is.null(seed)) set.seed(seed)
+  
+  starts <- vector("list", n_start)
+  starts[[1]] <- rep(0, q)
+  
+  if (!is.null(D)) {
+    D <- as.matrix(D)
+    sds <- sqrt(pmax(diag(0.5 * (D + t(D))), 1e-8))
+    sds_small <- pmax(sd_small * sds, 0.05)
+    sds_big <- pmax(sd_big * sds, 0.10)
+  } else {
+    sds_small <- rep(sd_small, q)
+    sds_big <- rep(sd_big, q)
+  }
+  
+  k <- 2L
+  
+  while (k <= n_start) {
+    starts[[k]] <- rnorm(q, 0, sds_small)
+    k <- k + 1L
+    if (k <= n_start) {
+      starts[[k]] <- rnorm(q, 0, sds_big)
+      k <- k + 1L
+    }
+  }
+  
+  starts
+}
+
+.grad_info_fullplug <- function(par, ff) {
+  g <- tryCatch(
+    numDeriv::grad(ff, par),
+    error = function(e) rep(NA_real_, length(par))
+  )
+  
+  list(
+    grad = g,
+    grad_norm = sqrt(sum(g^2, na.rm = TRUE)),
+    grad_maxabs = max(abs(g), na.rm = TRUE)
+  )
+}
+
+.fit_one_start_fullplug <- function(start,
+                                    ff,
+                                    use_nm = TRUE,
+                                    use_grad_refine = TRUE,
+                                    nm_maxit = 400,
+                                    bfgs_maxit = 400,
+                                    reltol = 1e-10) {
+  par0 <- as.numeric(start)
+  
+  if (isTRUE(use_nm)) {
+    nm <- try(
+      optim(
+        par0,
+        ff,
+        method = "Nelder-Mead",
+        control = list(maxit = nm_maxit, reltol = reltol)
+      ),
+      silent = TRUE
+    )
+    
+    if (!inherits(nm, "try-error") && is.list(nm) && is.finite(nm$value)) {
+      par0 <- nm$par
+    }
+  }
+  
+  op1 <- try(
+    optim(
+      par0,
+      ff,
+      method = "BFGS",
+      hessian = TRUE,
+      control = list(maxit = bfgs_maxit, reltol = reltol)
+    ),
+    silent = TRUE
+  )
+  
+  if (inherits(op1, "try-error") || !is.list(op1) || !is.finite(op1$value)) {
+    return(NULL)
+  }
+  
+  best <- op1
+  
+  if (isTRUE(use_grad_refine)) {
+    gg <- function(bb) numDeriv::grad(ff, bb)
+    
+    op2 <- try(
+      optim(
+        op1$par,
+        ff,
+        gr = gg,
+        method = "BFGS",
+        hessian = TRUE,
+        control = list(maxit = bfgs_maxit, reltol = reltol)
+      ),
+      silent = TRUE
+    )
+    
+    if (!inherits(op2, "try-error") && is.list(op2) && is.finite(op2$value)) {
+      if (op2$value <= best$value) best <- op2
+    }
+  }
+  
+  gi <- .grad_info_fullplug(best$par, ff)
+  
+  best$grad <- gi$grad
+  best$grad_norm <- gi$grad_norm
+  best$grad_maxabs <- gi$grad_maxabs
+  best
+}
+.find_mode_b_fullplug <- function(object,
+                                  df_i,
+                                  t_cut,
+                                  timeVar = "visit_m",
+                                  scale = 1.6,
+                                  pmvnorm_control = mvtnorm::GenzBretz(
+                                    maxpts = 25000,
+                                    abseps = 1e-04,
+                                    releps = 0
+                                  ),
+                                  start = NULL,
+                                  incremental = TRUE,
+                                  n_start = 3,
+                                  seed = NULL,
+                                  stage_maxit = 60,
+                                  final_maxit = 120,
+                                  reltol = 1e-08,
+                                  check_grad = FALSE) {
+  q <- nrow(object$D)
+  
+  ff_full <- function(bb) {
+    - .fullplug_logpost_b(
+      bb,
+      object = object,
+      df_i = df_i,
+      t_cut = t_cut,
+      timeVar = timeVar,
+      pmvnorm_control = pmvnorm_control
+    )
+  }
+  
+  run_bfgs <- function(par0, ff, maxit, hessian = FALSE) {
+    try(
+      optim(
+        par = par0,
+        fn = ff,
+        method = "BFGS",
+        hessian = hessian,
+        control = list(maxit = maxit, reltol = reltol)
+      ),
+      silent = TRUE
+    )
+  }
+  
+  make_jitter <- function(center, mult = 0.15) {
+    if (is.null(object$D)) {
+      sds <- rep(mult, q)
+    } else {
+      sds <- sqrt(pmax(diag(0.5 * (object$D + t(object$D))), 1e-8))
+      sds <- pmax(mult * sds, 0.05)
+    }
+    as.numeric(center + rnorm(q, 0, sds))
+  }
+  
+  if (!is.null(seed)) set.seed(seed)
+  
+  if (is.null(start)) {
+    start0 <- rep(0, q)
+  } else {
+    start0 <- as.numeric(start)
+    if (length(start0) != q) stop("'start' ha lunghezza incompatibile con q.")
+  }
+  
+  starts <- list(start0)
+  
+  if (isTRUE(incremental)) {
+    times_i <- sort(unique(df_i[[timeVar]][df_i[[timeVar]] <= t_cut]))
+    times_i <- times_i[is.finite(times_i)]
+    
+    if (!length(times_i)) {
+      times_i <- t_cut
+    }
+    
+    par_path <- start0
+    
+    for (tt in times_i) {
+      df_tt <- df_i[df_i[[timeVar]] <= tt, , drop = FALSE]
+      
+      ff_tt <- function(bb) {
+        - .fullplug_logpost_b(
+          bb,
+          object = object,
+          df_i = df_tt,
+          t_cut = tt,
+          timeVar = timeVar,
+          pmvnorm_control = pmvnorm_control
+        )
+      }
+      
+      op_tt <- run_bfgs(par_path, ff_tt, maxit = stage_maxit, hessian = FALSE)
+      
+      if (!inherits(op_tt, "try-error") && is.list(op_tt) && is.finite(op_tt$value)) {
+        par_path <- op_tt$par
+      }
+    }
+    
+    starts[[length(starts) + 1L]] <- par_path
+  }
+  
+  while (length(starts) < n_start) {
+    base_center <- starts[[length(starts)]]
+    starts[[length(starts) + 1L]] <- make_jitter(base_center, mult = 0.10)
+  }
+  
+  fits0 <- vector("list", length(starts))
+  vals0 <- rep(Inf, length(starts))
+  
+  for (j in seq_along(starts)) {
+    opj <- run_bfgs(starts[[j]], ff_full, maxit = final_maxit, hessian = FALSE)
+    fits0[[j]] <- opj
+    
+    if (!inherits(opj, "try-error") && is.list(opj) && is.finite(opj$value)) {
+      vals0[j] <- opj$value
+    }
+  }
+  
+  if (!any(is.finite(vals0))) {
+    stop("nessuna ottimizzazione riuscita in .find_mode_b_fullplug().")
+  }
+  
+  jbest <- which.min(vals0)
+  par_best <- fits0[[jbest]]$par
+  
+  opt <- run_bfgs(par_best, ff_full, maxit = final_maxit, hessian = TRUE)
+  
+  if (inherits(opt, "try-error") || !is.list(opt) || !is.finite(opt$value)) {
+    stop("ottimizzazione finale fallita in .find_mode_b_fullplug().")
+  }
+  
+  H <- opt$hessian
+  H <- 0.5 * (H + t(H))
+  
+  V <- try(scale * solve(H), silent = TRUE)
+  if (inherits(V, "try-error") || any(!is.finite(V))) {
+    V <- scale * .safe_hinv(H)
+  }
+  V <- 0.5 * (V + t(V))
+  
+  g <- rep(NA_real_, q)
+  gnorm <- NA_real_
+  gmax <- NA_real_
+  
+  if (isTRUE(check_grad)) {
+    g <- try(cd(opt$par, ff_full), silent = TRUE)
+    if (!inherits(g, "try-error")) {
+      gnorm <- sqrt(sum(g^2))
+      gmax <- max(abs(g))
+    } else {
+      g <- rep(NA_real_, q)
+    }
+  }
+  
+  list(
+    mode = opt$par,
+    var = V,
+    hessian = H,
+    opt = opt,
+    grad = g,
+    grad_norm = gnorm,
+    grad_maxabs = gmax,
+    objective = opt$value,
+    starts = starts,
+    start_values = vals0
+  )
+}
+
+
+.fill_D_into_theta <- function(theta, D) {
+  D_names <- rownames(D)
+  
+  for (nm in D_names) {
+    vn <- paste0("var_", nm)
+    if (vn %in% names(theta)) theta[[vn]] <- D[nm, nm]
+  }
+  
+  for (i in seq_along(D_names)) {
+    for (j in seq_len(i - 1L)) {
+      a <- D_names[i]
+      b <- D_names[j]
+      nm1 <- paste0("cov_", a, "__", b)
+      nm2 <- paste0("cov_", b, "__", a)
+      if (nm1 %in% names(theta)) theta[[nm1]] <- D[a, b]
+      if (nm2 %in% names(theta)) theta[[nm2]] <- D[a, b]
+    }
+  }
+  
+  theta
+}
+
+.fill_R_into_theta <- function(theta, R) {
+  outcome_names <- rownames(R)
+  
+  for (i in 2:length(outcome_names)) {
+    for (j in 1:(i - 1)) {
+      a <- outcome_names[i]
+      b <- outcome_names[j]
+      rr <- R[a, b]
+      
+      nm_corr_1 <- paste0("corr_resid__", a, "__", b)
+      nm_corr_2 <- paste0("corr_resid__", b, "__", a)
+      nm_atanh_1 <- paste0("atanh_rho_resid__", a, "__", b)
+      nm_atanh_2 <- paste0("atanh_rho_resid__", b, "__", a)
+      
+      if (nm_corr_1 %in% names(theta)) theta[[nm_corr_1]] <- rr
+      if (nm_corr_2 %in% names(theta)) theta[[nm_corr_2]] <- rr
+      
+      zz <- atanh(pmin(pmax(rr, -0.999999), 0.999999))
+      if (nm_atanh_1 %in% names(theta)) theta[[nm_atanh_1]] <- zz
+      if (nm_atanh_2 %in% names(theta)) theta[[nm_atanh_2]] <- zz
+    }
+  }
+  
+  theta
+}
+
+.repair_pairwise_global_draw <- function(psi_draw,
+                                         D_names,
+                                         outcome_names,
+                                         repair_D = TRUE,
+                                         repair_R = TRUE,
+                                         eps_D = 1e-8) {
+  out <- psi_draw
+  
+  if (isTRUE(repair_D)) {
+    D <- theta_to_D(out, D_names)
+    D <- project_spd(D, eps = eps_D)
+    out <- .fill_D_into_theta(out, D)
+  }
+  
+  if (isTRUE(repair_R)) {
+    R <- theta_to_R(out, outcome_names)
+    R <- project_corr(R)
+    out <- .fill_R_into_theta(out, R)
+  }
+  
+  out
+}
+
+
+
+
