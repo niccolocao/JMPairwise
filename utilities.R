@@ -951,7 +951,27 @@ extract_params_vec <- function(res,
 }
 
 
-
+process_one <- function(fp, K_map) {
+  res <- readRDS(fp)
+  
+  if (is.data.frame(res$pair)) {
+    if (!"item1" %in% names(res$pair) && "ord_item" %in% names(res$pair)) res$pair$item1 <- res$pair$ord_item
+    if (!"item2" %in% names(res$pair) && "cont_item" %in% names(res$pair)) res$pair$item2 <- res$pair$cont_item
+  }
+  
+  ex <- tryCatch(
+    extract_params_vec(
+      res,
+      obj_name      = basename(fp),
+      return_scores = TRUE,
+      K_mode        = "map",
+      K_map         = K_map
+    ),
+    error = function(e) stop(basename(fp), " -> ", conditionMessage(e))
+  )
+  
+  list(file = fp, ex = ex, pars = ex$pars, grad = ex$grad, H = ex$H, issues = ex$issues)
+}
 
 ####################################
 ####################################
