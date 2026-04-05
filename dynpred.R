@@ -29,9 +29,7 @@ prep_long_all_items_surv_mixed2 <- function(
   
   cont_itemnames <- as.character(cont_itemnames)
   miss_cont <- setdiff(cont_itemnames, names(dat))
-  if (length(miss_cont)) {
-    stop("mancano queste colonne continue in dat: ", paste(miss_cont, collapse = ", "))
-  }
+ 
   
   if (is.null(cont_transforms)) {
     cont_transforms <- stats::setNames(vector("list", length(cont_itemnames)), cont_itemnames)
@@ -158,9 +156,7 @@ prep_long_all_items_surv <- function(dat,
                                      admin_date = "2025-01-01",  
                                      rehosp_horizon_days = 30) { 
   
-  if (missing(surv_outcome)) {
-    stop("Devi passare surv_outcome = 'failure' oppure surv_outcome = 'rehosp30'.")
-  }
+
   surv_outcome <- match.arg(surv_outcome, choices = c("failure","rehosp30"))
   
   suppressPackageStartupMessages({
@@ -428,10 +424,8 @@ make_fullplug_object <- function(est,
                                  time_unit = "months",
                                  theta_sampler = NULL,
                                  covariate_transforms = NULL) {
-  
-  if (is.null(names(est))) stop("est deve avere names().")
-  if (is.null(rownames(D)) || is.null(colnames(D))) stop("D deve avere rownames/colnames.")
-  
+
+    
   sanitize_name <- function(x) {
     x <- gsub("\\s+", "_", x)
     gsub("[^[:alnum:]_]+", "", x)
@@ -448,7 +442,7 @@ make_fullplug_object <- function(est,
   get_surv_par <- function(name_plain, name_log, transform = exp) {
     if (name_plain %in% names(est)) return(unname(est[[name_plain]]))
     if (name_log %in% names(est)) return(transform(unname(est[[name_log]])))
-    stop("parametro mancante: ", name_plain, " / ", name_log)
+    stop("missing estiamte: ", name_plain, " / ", name_log)
   }
   
   build_beta_item <- function(item_s) {
@@ -465,7 +459,6 @@ make_fullplug_object <- function(est,
   build_thresholds <- function(item_s, K) {
     pat <- paste0("^threshold_", item_s, "_cut:")
     ii <- grep(pat, names(est))
-    if (!length(ii)) stop("soglie mancanti per ", item_s)
     vv <- est[ii]
     cut_id <- as.integer(sub(pat, "", names(vv)))
     vv <- vv[order(cut_id)]
@@ -477,7 +470,7 @@ make_fullplug_object <- function(est,
     nm2 <- paste0("log_sigma_", item_s)
     if (nm1 %in% names(est)) return(unname(est[[nm1]]))
     if (nm2 %in% names(est)) return(exp(unname(est[[nm2]])))
-    stop("sigma mancante per ", item_s)
+    stop("sigma missing for ", item_s)
   }
   
   infer_resid_corr <- function(est, items_s) {
@@ -624,23 +617,19 @@ prep_newdata_fullplug <- function(newdata,
   }
   
   if (!"wI6" %in% names(out)) {
-    if (!"waiting" %in% names(out)) stop("manca 'waiting', quindi non posso costruire wI6.")
-    out$wI6 <- out$waiting * out$I6
+     out$wI6 <- out$waiting * out$I6
   }
   
   if (!"wI12" %in% names(out)) {
-    if (!"waiting" %in% names(out)) stop("manca 'waiting', quindi non posso costruire wI12.")
     out$wI12 <- out$waiting * out$I12
   }
   
   if (!"pI6" %in% names(out)) {
-    if (!"prost_uni" %in% names(out)) stop("manca 'prost_uni', quindi non posso costruire pI6.")
-    out$pI6 <- out$prost_uni * out$I6
+     out$pI6 <- out$prost_uni * out$I6
   }
   
   if (!"pI12" %in% names(out)) {
-    if (!"prost_uni" %in% names(out)) stop("manca 'prost_uni', quindi non posso costruire pI12.")
-    out$pI12 <- out$prost_uni * out$I12
+     out$pI12 <- out$prost_uni * out$I12
   }
   
   if (!is.null(object) && !is.null(object$covariate_transforms)) {
@@ -665,7 +654,7 @@ prep_newdata_fullplug <- function(newdata,
     if (nm %in% c("(Intercept)", "Intercept")) {
       out <- out + beta[[nm]]
     } else {
-      if (!nm %in% names(row)) stop("covariata mancante in newdata: ", nm)
+      if (!nm %in% names(row)) stop("cmissing covariate in newdata: ", nm)
       out <- out + beta[[nm]] * as.numeric(row[[nm]][1])
     }
   }
@@ -678,7 +667,7 @@ prep_newdata_fullplug <- function(newdata,
   outk <- object$outcomes[[outcome_name]]
   mu <- .fullplug_xbeta(row, outk$beta)
   rn <- outk$re_names
-  if (!all(rn %in% names(b))) stop("random effects mancanti per ", outcome_name)
+  if (!all(rn %in% names(b))) stop("random effects missing for ", outcome_name)
   mu <- mu +
     as.numeric(row$I0[1]) * b[[rn[1]]] +
     as.numeric(row$Ipost[1]) * b[[rn[2]]]
@@ -710,7 +699,6 @@ prep_newdata_fullplug <- function(newdata,
   K <- length(thr) + 1L
   if (is.na(y)) return(c(NA_real_, NA_real_))
   y <- as.integer(y)
-  if (y < 1L || y > K) stop("categoria ordinale fuori range.")
   lo <- if (y == 1L) -Inf else thr[y - 1L]
   up <- if (y == K) Inf else thr[y]
   c(lo, up)
@@ -963,7 +951,7 @@ theta_to_D <- function(theta, D_names) {
   
   for (nm in D_names) {
     vn <- paste0("var_", nm)
-    if (!vn %in% names(theta)) stop("manca ", vn, " nel draw di theta.")
+    if (!vn %in% names(theta)) stop("missing ", vn, " in draw of theta.")
     D[nm, nm] <- theta[[vn]]
   }
   
@@ -1100,14 +1088,11 @@ pair_raw_to_psi_exact <- function(theta_pair_pref) {
     R_max_abs = NA_real_,
     R_rel = NA_real_
   )
-  
-  if (any(!is.finite(psi_draw))) {
-    stop("psi_draw contiene valori non finiti.")
-  }
+
+    
   
   D_raw <- theta_to_D(psi_draw, rownames(object$D))
-  if (any(!is.finite(D_raw))) stop("D_raw contiene valori non finiti.")
-  
+
   D_fix <- project_spd(D_raw)
   out$D_max_abs <- max(abs(D_fix - D_raw), na.rm = TRUE)
   out$D_rel <- .pair_rel_diff(D_fix, D_raw)
@@ -1118,8 +1103,7 @@ pair_raw_to_psi_exact <- function(theta_pair_pref) {
   }
   
   R_raw <- theta_to_R(out$psi_use, names(object$outcomes))
-  if (any(!is.finite(R_raw))) stop("R_raw contiene valori non finiti.")
-  
+
   R_fix <- project_corr(R_raw)
   out$R_max_abs <- max(abs(R_fix - R_raw), na.rm = TRUE)
   out$R_rel <- .pair_rel_diff(R_fix, R_raw)
@@ -1191,13 +1175,6 @@ make_theta_sampler_pairwise_raw <- function(ex_pref_for_jk,
   theta_raw_mean <- unlist(theta_blocks, use.names = TRUE)
   
   V_theta_raw <- as.matrix(V_theta_raw)
-  if (is.null(colnames(V_theta_raw)) || is.null(rownames(V_theta_raw))) {
-    stop("V_theta_raw deve avere rownames e colnames.")
-  }
-  
-  if (!setequal(rownames(V_theta_raw), colnames(V_theta_raw))) {
-    stop("rownames(V_theta_raw) e colnames(V_theta_raw) non coincidono come insieme.")
-  }
   
   V_theta_raw <- V_theta_raw[colnames(V_theta_raw), colnames(V_theta_raw), drop = FALSE]
   
@@ -1205,9 +1182,9 @@ make_theta_sampler_pairwise_raw <- function(ex_pref_for_jk,
     miss1 <- setdiff(names(theta_raw_mean), colnames(V_theta_raw))
     miss2 <- setdiff(colnames(V_theta_raw), names(theta_raw_mean))
     stop(
-      "nomi incompatibili tra theta_raw_mean e V_theta_raw.\n",
-      "in theta_raw_mean ma non in V_theta_raw: ", paste(head(miss1, 20), collapse = ", "), "\n",
-      "in V_theta_raw ma non in theta_raw_mean: ", paste(head(miss2, 20), collapse = ", ")
+      "unmatching names between theta_raw_mean and V_theta_raw.\n",
+      "in theta_raw_mean but not in V_theta_raw: ", paste(head(miss1, 20), collapse = ", "), "\n",
+      "in V_theta_raw but not in theta_raw_mean: ", paste(head(miss2, 20), collapse = ", ")
     )
   }
   
@@ -1227,9 +1204,9 @@ make_theta_sampler_pairwise_raw <- function(ex_pref_for_jk,
     miss1 <- setdiff(colnames(A_all), names(psi_all_mean))
     miss2 <- setdiff(names(psi_all_mean), colnames(A_all))
     stop(
-      "nomi incompatibili tra A_all e psi_all_mean.\n",
-      "in A_all ma non in psi_all_mean: ", paste(head(miss1, 20), collapse = ", "), "\n",
-      "in psi_all_mean ma non in A_all: ", paste(head(miss2, 20), collapse = ", ")
+      "unmatching names between A_all e psi_all_mean.\n",
+      "in A_all but not in psi_all_mean: ", paste(head(miss1, 20), collapse = ", "), "\n",
+      "in psi_all_mean but not in A_all: ", paste(head(miss2, 20), collapse = ", ")
     )
   }
   
@@ -1254,9 +1231,9 @@ make_theta_sampler_pairwise_raw <- function(ex_pref_for_jk,
       miss1 <- setdiff(colnames(A_all), names(psi_all_draw))
       miss2 <- setdiff(names(psi_all_draw), colnames(A_all))
       stop(
-        "nomi incompatibili tra A_all e psi_all_draw.\n",
-        "in A_all ma non in psi_all_draw: ", paste(head(miss1, 20), collapse = ", "), "\n",
-        "in psi_all_draw ma non in A_all: ", paste(head(miss2, 20), collapse = ", ")
+        "unmatching names between A_all e psi_all_draw.\n",
+        "in A_all but not in psi_all_draw: ", paste(head(miss1, 20), collapse = ", "), "\n",
+        "in psi_all_draw but not in A_all: ", paste(head(miss2, 20), collapse = ", ")
       )
     }
     
@@ -1360,8 +1337,6 @@ draw_theta_fullplug <- function(object, theta_source = c("global", "pairwise_raw
   if (is.null(sampler)) stop("object$theta_sampler mancante.")
   
   if (theta_source == "global") {
-    if (sampler$type != "global") stop("theta_sampler non è di tipo 'global'.")
-    
     theta_draw <- as.numeric(MASS::mvrnorm(
       1,
       mu = sampler$theta_mean,
@@ -1373,8 +1348,6 @@ draw_theta_fullplug <- function(object, theta_source = c("global", "pairwise_raw
   }
   
   if (theta_source == "pairwise_raw") {
-    if (sampler$type != "pairwise_raw") stop("theta_sampler non è di tipo 'pairwise_raw'.")
-    
     draw_id <- getOption("fullplug_iter")
     
     theta_raw_draw <- as.numeric(MASS::mvrnorm(
@@ -1386,22 +1359,11 @@ draw_theta_fullplug <- function(object, theta_source = c("global", "pairwise_raw
     
     psi_global_draw <- sampler$draw_to_global(theta_raw_draw)
     chk <- .pair_correct_draw(object, psi_global_draw)
-    
-    if (isTRUE(sampler$verbose)) {
-      cat(sprintf(
-        "draw %d ACCEPTED corrected_D=%s corrected_R=%s D[max=%.3e rel=%.3e] R[max=%.3e rel=%.3e]\n",
-        draw_id,
-        ifelse(chk$corrected_D, "yes", "no"),
-        ifelse(chk$corrected_R, "yes", "no"),
-        chk$D_max_abs, chk$D_rel,
-        chk$R_max_abs, chk$R_rel
-      ))
-    }
-    
+
+          
     return(apply_psi_draw_to_object(object, chk$psi_use))
   }
   
-  stop("theta_source non riconosciuto.")
 }
 
 sanitize_proposal_Sigma <- function(S, eps = 1e-6, max_var = 10) {
@@ -1435,32 +1397,23 @@ make_fake_hist_wide <- function(id,
                                 age_already_scaled = TRUE) {
   times_in <- match.arg(times_in)
   
-  if (!is.data.frame(covariates_row) || nrow(covariates_row) != 1L) {
-    stop("covariates_row deve essere un data.frame con una sola riga.")
-  }
-  
-  if (is.null(colnames(Y_ord))) {
-    stop("Y_ord deve avere colnames = ord_items.")
-  }
+
+    
   
   ord_items <- as.character(ord_items)
   
   if (!all(ord_items %in% colnames(Y_ord))) {
     miss <- setdiff(ord_items, colnames(Y_ord))
-    stop("mancano queste colonne ordinali in Y_ord: ", paste(miss, collapse = ", "))
+    stop("missing ordianl columns in Y_ord: ", paste(miss, collapse = ", "))
   }
   
   Y_ord <- as.data.frame(Y_ord[, ord_items, drop = FALSE])
   
   n_vis <- nrow(Y_ord)
   if (length(times) != n_vis) {
-    stop("length(times) deve coincidere con nrow(Y_ord).")
+    stop("length(times) must coincide with nrow(Y_ord).")
   }
-  
-  if (!is.null(cont_name)) {
-    if (is.null(Y_cont)) stop("se cont_name non è NULL devi passare Y_cont.")
-    if (length(Y_cont) != n_vis) stop("length(Y_cont) deve coincidere con nrow(Y_ord).")
-  }
+
   
   visit_m <- if (times_in == "months") {
     as.numeric(times)
@@ -1566,9 +1519,8 @@ make_fake_hist_wide_baseline <- function(id,
 ensure_sym_pd <- function(S, eps = 1e-8) {
   S <- as.matrix(S)
   storage.mode(S) <- "double"
-  
-  if (nrow(S) != ncol(S)) stop("S deve essere quadrata.")
-  
+
+    
   S <- 0.5 * (S + t(S))
   
   ee <- eigen(S, symmetric = TRUE)
@@ -2096,7 +2048,7 @@ make_theta_sampler_global <- function(theta_mean, V_theta) {
 
 as_plot_out_from_fullplug <- function(pred, id = NULL) {
   if (is.null(pred$summaries) || !is.list(pred$summaries) || length(pred$summaries) == 0) {
-    stop("pred deve essere un output di survfitJM_fullplug() con pred$summaries.")
+    stop("pred must be output of survfitJM_fullplug() con pred$summaries.")
   }
   
   ids0 <- names(pred$summaries)
@@ -2116,8 +2068,7 @@ as_plot_out_from_fullplug <- function(pred, id = NULL) {
   
   get_cols <- function(S) {
     cn <- colnames(S)
-    if (is.null(cn)) stop("Ogni elemento di pred$summaries deve avere colonne nominate.")
-    
+      
     if ("predSurv" %in% cn) {
       list(
         times  = as.numeric(S[, "times"]),
@@ -2153,9 +2104,7 @@ as_plot_out_from_fullplug <- function(pred, id = NULL) {
     Si <- pred$summaries[[i]]
     ex <- get_cols(Si)
     
-    if (length(ex$times) != nt || any(abs(ex$times - t_grid) > 1e-10)) {
-      stop("Le griglie dei tempi nelle summaries non coincidono tra soggetti.")
-    }
+    
     
     M_med[i, ] <- ex$median
     M_lo[i, ]  <- ex$lower
