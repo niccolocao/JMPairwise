@@ -4,7 +4,7 @@ library(mvtnorm)
 
 
 
-
+#prepare the full long dataset with ordinal outcomes, optional continuous outcomes, and survival data
 prep_long_all_items_surv_mixed2 <- function(
     dat,
     ord_itemnames,
@@ -151,11 +151,12 @@ prep_long_all_items_surv_mixed2 <- function(
   tmp
 }
 
+#prepares the base long dataset with ordinal outcomes and survival information
 prep_long_all_items_surv <- function(dat,
                                      itemnames,
-                                     surv_outcome,              # OBBLIGATORIO: "failure" o "rehosp30"
-                                     admin_date = "2025-01-01",  # usato SOLO se surv_outcome == "failure"
-                                     rehosp_horizon_days = 30) { # finestra fissa 30gg (censura per tutti)
+                                     surv_outcome,              
+                                     admin_date = "2025-01-01",  
+                                     rehosp_horizon_days = 30) { 
   
   if (missing(surv_outcome)) {
     stop("Devi passare surv_outcome = 'failure' oppure surv_outcome = 'rehosp30'.")
@@ -165,8 +166,8 @@ prep_long_all_items_surv <- function(dat,
   suppressPackageStartupMessages({
     library(dplyr); library(tidyr)
   })
-  
-  ## 1) ricodifiche
+
+    
   dat <- dat %>%
     mutate(
       ID        = factor(ID),
@@ -176,7 +177,7 @@ prep_long_all_items_surv <- function(dat,
     ) %>%
     filter(!if_all(everything(), is.na))
   
-  ## 2) longitudinal core
+  #longitudinal 
   base_long <- dat %>%
     group_by(ID) %>%
     arrange(times, .by_group = TRUE) %>%
@@ -195,10 +196,10 @@ prep_long_all_items_surv <- function(dat,
     ) %>%
     ungroup()
   
-  ## 3) survival core (branch)
+  #survival 
   if (surv_outcome == "failure") {
-    
-    # --- failure protesi: usa admin_date per censura amministrativa ---
+
+      
     admin_date <- as.POSIXct(admin_date, tz = attr(dat$date_intervention, "tzone"))
     
     surv_core <- dat %>%
@@ -232,9 +233,9 @@ prep_long_all_items_surv <- function(dat,
     
   } else {
     
-    # --- rehosp30: censura PER TUTTI a 30 giorni (NO admin_date) ---
+
     if (!"date_hosp30g" %in% names(dat)) {
-      stop("Manca la colonna 'date_hosp30g' nel dataset.")
+      stop("No 'date_hosp30g' in dataset.")
     }
     
     H <- as.numeric(rehosp_horizon_days)
@@ -268,8 +269,8 @@ prep_long_all_items_surv <- function(dat,
     left_join(surv_core, by = "ID") %>%
     relocate(start, stop, status, .after = ID) %>%
     tidyr::drop_na(start, stop, status, sex01, prost_uni, loghosp, age, diag_oa)
-  
-  ## 4) dat0
+
+    
   dat0 <- dat2 %>%
     mutate(
       ID        = as.factor(ID),
@@ -281,7 +282,7 @@ prep_long_all_items_surv <- function(dat,
       prost_uni = as.integer(prosthesis_type == "unicompartimental")
     )
   
-  ## 5) ORD: pivot_longer su tutti gli item
+  ## ORD
   ord <- dat0 %>%
     dplyr::select(
       ID, visit_idx, I0, I6, I12, Ipost,
@@ -320,8 +321,8 @@ prep_long_all_items_surv <- function(dat,
     ) %>%
     dplyr::ungroup()
   
-  ## 6) SURV: una riga per ID
-  surv <- dat0 %>%
+  
+    surv <- dat0 %>%
     group_by(ID) %>% slice_head(n = 1) %>% ungroup() %>%
     transmute(
       ID,
@@ -348,8 +349,8 @@ prep_long_all_items_surv <- function(dat,
   long <- bind_rows(ord2, surv) %>%
     arrange(ID, type, time, item)
   
-  ## 7) scaling age (su 1 riga per ID)
-  age_ref <- dat0 %>% distinct(ID, age)
+
+ age_ref <- dat0 %>% distinct(ID, age)
   m_age <- mean(age_ref$age, na.rm = TRUE)
   s_age <- sd(age_ref$age, na.rm = TRUE)
   
@@ -368,13 +369,13 @@ prep_long_all_items_surv <- function(dat,
     y   = ifelse(long$type == 0L, long$y, 0L),
     idx = long$row_id
   )
-  
-  ## 8) K per item
+
+    
   K_by_item <- ord %>%
     group_by(item) %>%
     summarise(K = max(y, na.rm = TRUE), .groups = "drop")
-  
-  ## join info K_item
+
+    
   item_info <- tibble::tibble(
     item   = itemnames,
     K_item = vapply(dat[itemnames], function(x) {
@@ -387,18 +388,18 @@ prep_long_all_items_surv <- function(dat,
     dplyr::left_join(item_info, by = c("item_chr" = "item")) %>%
     dplyr::mutate(
       K_item = dplyr::if_else(type == 1L, NA_integer_, K_item),
-      is_K3  = dplyr::if_else(K_item == 3L, 1L, 0L, missing = 0L),
-      is_K5  = dplyr::if_else(K_item == 5L, 1L, 0L, missing = 0L)
+      is_K3 = dplyr::if_else(K_item == 3L, 1L, 0L, missing = 0L),
+      is_K5 = dplyr::if_else(K_item == 5L, 1L, 0L, missing = 0L)
     ) %>%
     dplyr::select(-item_chr)
   
   list(
-    long       = long,
-    ord        = ord,
-    surv       = surv,
-    K_by_item  = K_by_item,
+    long = long,
+    ord = ord,
+    surv = surv,
+    K_by_item = K_by_item,
     age_center = m_age,
-    age_scale  = s_age,
+    age_scale = s_age,
     surv_outcome = surv_outcome
   )
 }
@@ -414,6 +415,8 @@ sanitize_name <- function(x) {
   gsub("[^[:alnum:]_]+", "", x)
 }
 
+
+#build the full model object used for dynamic prediction
 make_fullplug_object <- function(est,
                                  D,
                                  K_map,
@@ -573,6 +576,7 @@ make_fullplug_object <- function(est,
   )
 }
 
+# Prepare new subject data for prediction and creates missing derived covariates
 prep_newdata_fullplug <- function(newdata,
                                   object = NULL,
                                   idVar = "ID",
@@ -653,6 +657,7 @@ prep_newdata_fullplug <- function(newdata,
   out
 }
 
+#compute the fixed-effects linear predictor for one row
 .fullplug_xbeta <- function(row, beta) {
   if (!length(beta)) return(0)
   out <- 0
@@ -667,6 +672,8 @@ prep_newdata_fullplug <- function(newdata,
   out
 }
 
+ 
+#compute the latent mean for one outcome using fixed and random effects
 .fullplug_mu <- function(object, row, b, outcome_name) {
   outk <- object$outcomes[[outcome_name]]
   mu <- .fullplug_xbeta(row, outk$beta)
@@ -678,18 +685,19 @@ prep_newdata_fullplug <- function(newdata,
   mu
 }
 
+# survival linear predictor
 .fullplug_surv_lp <- function(object, row, b) {
   eta <- .fullplug_xbeta(row, object$survival$beta)
   eta + b[[object$survival$frailty_name]]
 }
-
+#compute the log survival function up to time t
 .fullplug_logS <- function(object, row, b, t) {
   lam <- object$survival$lambda
   rho <- object$survival$rho
   eta <- .fullplug_surv_lp(object, row, b)
   - lam * (t^rho) * exp(eta)
 }
-
+#compute the conditional survival ratio between times t and u
 .fullplug_Sratio <- function(object, row, b, t, u) {
   lam <- object$survival$lambda
   rho <- object$survival$rho
@@ -697,6 +705,7 @@ prep_newdata_fullplug <- function(newdata,
   exp(- lam * ((u^rho) - (t^rho)) * exp(eta))
 }
 
+# latent interval corresponding to an observed ordinal category
 .fullplug_ord_bounds <- function(y, thr) {
   K <- length(thr) + 1L
   if (is.na(y)) return(c(NA_real_, NA_real_))
@@ -707,6 +716,7 @@ prep_newdata_fullplug <- function(newdata,
   c(lo, up)
 }
 
+ #extract the observed outcomes available in one row on the model scale
 .fullplug_make_obs <- function(object, row) {
   out_names <- names(object$outcomes)
   keep <- logical(length(out_names))
@@ -739,6 +749,7 @@ prep_newdata_fullplug <- function(newdata,
   vals[keep]
 }
 
+#residual covariance matrix for the outcomes observed at one visit
 .fullplug_resid_cov <- function(object, obs_names) {
   p <- length(obs_names)
   S <- matrix(0, p, p, dimnames = list(obs_names, obs_names))
@@ -785,6 +796,7 @@ prep_newdata_fullplug <- function(newdata,
   S
 }
 
+#log likelihood contribution of one visit
 .fullplug_visit_logdens <- function(object,
                                     row,
                                     b,
@@ -873,6 +885,7 @@ prep_newdata_fullplug <- function(newdata,
   log_fc + log(pmax(pr, 1e-12))
 }
 
+ #sum the longitudinal log likelihood contributions for one subject up to the cutoff time
 .fullplug_subject_long_logdens <- function(object,
                                            df_i,
                                            t_cut,
@@ -888,6 +901,7 @@ prep_newdata_fullplug <- function(newdata,
   }, numeric(1)))
 }
 
+#log posterior of the subject-specific random effects
 .fullplug_logpost_b <- function(b_vec,
                                 object,
                                 df_i,
@@ -911,13 +925,7 @@ prep_newdata_fullplug <- function(newdata,
   ll_long + ll_surv + ll_prior
 }
 
-.safe_hinv <- function(H) {
-  H <- 0.5 * (H + t(H))
-  ee <- eigen(H, symmetric = TRUE)
-  ee$values[ee$values < 1e-6] <- 1e-6
-  H2 <- ee$vectors %*% diag(ee$values, nrow = length(ee$values)) %*% t(ee$vectors)
-  solve(H2)
-}
+
 
 repair_thresholds <- function(x, eps = 1e-4) {
   x <- sort(as.numeric(x))
@@ -949,6 +957,7 @@ project_corr <- function(R, eps = 1e-8) {
   out
 }
 
+ #reconstruct the random-effects covariance matrix D from a parameter vector
 theta_to_D <- function(theta, D_names) {
   D <- matrix(0, length(D_names), length(D_names), dimnames = list(D_names, D_names))
   
@@ -1141,8 +1150,7 @@ psi_to_D <- function(psi_draw, D_names) {
       D[a, b] <- psi_draw[[cn]] 
       D[b, a] <- psi_draw[[cn]] } 
   } 
-  local({Df <- project_spd(D); 
-    if (max(abs(D - Df), na.rm = TRUE) > 1e-10) message("iter ", getOption("fullplug_iter"), ": corrected D"); Df}) 
+ project_spd(D)
 } 
 
 psi_to_R <- function(psi_draw, outcome_names) { 
@@ -1167,8 +1175,7 @@ psi_to_R <- function(psi_draw, outcome_names) {
       R[sp[2], sp[1]] <- psi_draw[[nm]] 
     } 
   } 
-  local({Rf <- project_corr(R); if (max(abs(R - Rf), na.rm = TRUE) > 1e-10) message("iter ", getOption("fullplug_iter"), ": corrected R"); Rf}) 
-  
+  project_corr(R)
   }
 
 make_theta_sampler_pairwise_raw <- function(ex_pref_for_jk,
@@ -1327,12 +1334,13 @@ apply_psi_draw_to_object <- function(object, psi_draw) {
   obj 
 } 
 
+ #draw one parameter vector from the global sampler                                
 draw_theta_global <- function(theta_sampler) { 
   th <- as.numeric(MASS::mvrnorm( 1, mu = theta_sampler$theta_mean, Sigma = theta_sampler$V_theta )) 
   names(th) <- names(theta_sampler$theta_mean) 
   th }
 
-
+#draw one parameter vector from the pairwise-raw sampler
 draw_theta_pairwise_raw <- function(theta_sampler) {
   th <- as.numeric(MASS::mvrnorm(
     1,
@@ -1342,7 +1350,8 @@ draw_theta_pairwise_raw <- function(theta_sampler) {
   names(th) <- names(theta_sampler$theta_mean)
   th
 }
-
+ 
+#draw parameters and returns an updated model object ready for prediction
 draw_theta_fullplug <- function(object, theta_source = c("global", "pairwise_raw")) {
   theta_source <- match.arg(theta_source)
   options(fullplug_iter = getOption("fullplug_iter", 0L) + 1L)
@@ -1412,7 +1421,7 @@ sanitize_proposal_Sigma <- function(S, eps = 1e-6, max_var = 10) {
   S2
 }
 
-
+#build a wide fake subject history for dynamic predictions
 make_fake_hist_wide <- function(id,
                                 ord_items,
                                 Y_ord,
@@ -1591,7 +1600,7 @@ ensure_sym_pd <- function(S, eps = 1e-8) {
 
 
 
-
+#computes a numerical gradient by central differences
 cd <- function(x, f, ..., eps = 1e-04) {
   x <- as.numeric(x)
   g <- numeric(length(x))
@@ -1605,6 +1614,7 @@ cd <- function(x, f, ..., eps = 1e-04) {
   g
 }
 
+#sampling from a multivariate t distribution
 rmvt <- function (n, mu, Sigma, df) {
   p <- length(mu)
   if (is.list(Sigma)) {
@@ -1622,6 +1632,7 @@ rmvt <- function (n, mu, Sigma, df) {
   if (n == 1L) drop(X) else t.default(X)
 }
 
+# #evaluating the multivariate t density
 dmvt <- function (x, mu, Sigma, df, log = FALSE) {
   if (!is.numeric(x))
     stop("'x' must be a numeric matrix or vector")
@@ -1645,6 +1656,8 @@ dmvt <- function (x, mu, Sigma, df, log = FALSE) {
     exp(fact) * ((1 + quad)^(- (df + p)/2))
 }
 
+
+ #find the posterior mode of the subject-specific random effects
 .find_mode_b_fullplug <- function(object,
                                   df_i,
                                   t_cut,
@@ -1717,6 +1730,9 @@ dmvt <- function (x, mu, Sigma, df, log = FALSE) {
     opt = opt
   )
 }
+
+
+# dynamic survival predictions for one or more subjects                                
 survfitJM_fullplug <- function(object,
                                newdata,
                                idVar = "ID",
@@ -1994,7 +2010,7 @@ survfitJM_fullplug <- function(object,
   out_res
 }
 
-
+#global parameter sampler on the final model scale
 make_theta_sampler_global <- function(theta_mean, V_theta) { 
   if (is.null(names(theta_mean))) stop("theta_mean deve avere names().") 
   V_theta <- as.matrix(V_theta) 
@@ -2280,173 +2296,8 @@ as_plot_out_from_fullplug <- function(pred, id = NULL) {
   best$grad_maxabs <- gi$grad_maxabs
   best
 }
-.find_mode_b_fullplug <- function(object,
-                                  df_i,
-                                  t_cut,
-                                  timeVar = "visit_m",
-                                  scale = 1.6,
-                                  pmvnorm_control = mvtnorm::GenzBretz(
-                                    maxpts = 25000,
-                                    abseps = 1e-04,
-                                    releps = 0
-                                  ),
-                                  start = NULL,
-                                  incremental = TRUE,
-                                  n_start = 3,
-                                  seed = NULL,
-                                  stage_maxit = 60,
-                                  final_maxit = 120,
-                                  reltol = 1e-08,
-                                  check_grad = FALSE) {
-  q <- nrow(object$D)
-  
-  ff_full <- function(bb) {
-    - .fullplug_logpost_b(
-      bb,
-      object = object,
-      df_i = df_i,
-      t_cut = t_cut,
-      timeVar = timeVar,
-      pmvnorm_control = pmvnorm_control
-    )
-  }
-  
-  run_bfgs <- function(par0, ff, maxit, hessian = FALSE) {
-    try(
-      optim(
-        par = par0,
-        fn = ff,
-        method = "BFGS",
-        hessian = hessian,
-        control = list(maxit = maxit, reltol = reltol)
-      ),
-      silent = TRUE
-    )
-  }
-  
-  make_jitter <- function(center, mult = 0.15) {
-    if (is.null(object$D)) {
-      sds <- rep(mult, q)
-    } else {
-      sds <- sqrt(pmax(diag(0.5 * (object$D + t(object$D))), 1e-8))
-      sds <- pmax(mult * sds, 0.05)
-    }
-    as.numeric(center + rnorm(q, 0, sds))
-  }
-  
-  if (!is.null(seed)) set.seed(seed)
-  
-  if (is.null(start)) {
-    start0 <- rep(0, q)
-  } else {
-    start0 <- as.numeric(start)
-    if (length(start0) != q) stop("'start' ha lunghezza incompatibile con q.")
-  }
-  
-  starts <- list(start0)
-  
-  if (isTRUE(incremental)) {
-    times_i <- sort(unique(df_i[[timeVar]][df_i[[timeVar]] <= t_cut]))
-    times_i <- times_i[is.finite(times_i)]
-    
-    if (!length(times_i)) {
-      times_i <- t_cut
-    }
-    
-    par_path <- start0
-    
-    for (tt in times_i) {
-      df_tt <- df_i[df_i[[timeVar]] <= tt, , drop = FALSE]
-      
-      ff_tt <- function(bb) {
-        - .fullplug_logpost_b(
-          bb,
-          object = object,
-          df_i = df_tt,
-          t_cut = tt,
-          timeVar = timeVar,
-          pmvnorm_control = pmvnorm_control
-        )
-      }
-      
-      op_tt <- run_bfgs(par_path, ff_tt, maxit = stage_maxit, hessian = FALSE)
-      
-      if (!inherits(op_tt, "try-error") && is.list(op_tt) && is.finite(op_tt$value)) {
-        par_path <- op_tt$par
-      }
-    }
-    
-    starts[[length(starts) + 1L]] <- par_path
-  }
-  
-  while (length(starts) < n_start) {
-    base_center <- starts[[length(starts)]]
-    starts[[length(starts) + 1L]] <- make_jitter(base_center, mult = 0.10)
-  }
-  
-  fits0 <- vector("list", length(starts))
-  vals0 <- rep(Inf, length(starts))
-  
-  for (j in seq_along(starts)) {
-    opj <- run_bfgs(starts[[j]], ff_full, maxit = final_maxit, hessian = FALSE)
-    fits0[[j]] <- opj
-    
-    if (!inherits(opj, "try-error") && is.list(opj) && is.finite(opj$value)) {
-      vals0[j] <- opj$value
-    }
-  }
-  
-  if (!any(is.finite(vals0))) {
-    stop("nessuna ottimizzazione riuscita in .find_mode_b_fullplug().")
-  }
-  
-  jbest <- which.min(vals0)
-  par_best <- fits0[[jbest]]$par
-  
-  opt <- run_bfgs(par_best, ff_full, maxit = final_maxit, hessian = TRUE)
-  
-  if (inherits(opt, "try-error") || !is.list(opt) || !is.finite(opt$value)) {
-    stop("ottimizzazione finale fallita in .find_mode_b_fullplug().")
-  }
-  
-  H <- opt$hessian
-  H <- 0.5 * (H + t(H))
-  
-  V <- try(scale * solve(H), silent = TRUE)
-  if (inherits(V, "try-error") || any(!is.finite(V))) {
-    V <- scale * .safe_hinv(H)
-  }
-  V <- 0.5 * (V + t(V))
-  
-  g <- rep(NA_real_, q)
-  gnorm <- NA_real_
-  gmax <- NA_real_
-  
-  if (isTRUE(check_grad)) {
-    g <- try(cd(opt$par, ff_full), silent = TRUE)
-    if (!inherits(g, "try-error")) {
-      gnorm <- sqrt(sum(g^2))
-      gmax <- max(abs(g))
-    } else {
-      g <- rep(NA_real_, q)
-    }
-  }
-  
-  list(
-    mode = opt$par,
-    var = V,
-    hessian = H,
-    opt = opt,
-    grad = g,
-    grad_norm = gnorm,
-    grad_maxabs = gmax,
-    objective = opt$value,
-    starts = starts,
-    start_values = vals0
-  )
-}
 
-
+    
 .fill_D_into_theta <- function(theta, D) {
   D_names <- rownames(D)
   
