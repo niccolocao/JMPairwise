@@ -6,6 +6,8 @@ library(numDeriv)
 ###                Estimates extractor                  ###
 ####                                                   ####
 ###########################################################
+
+#extract parameter vector, hessian, and subject level scores
 extract_params_vec <- function(res,
                                obj_name = NULL,
                                return_scores = TRUE,
@@ -15,15 +17,18 @@ extract_params_vec <- function(res,
                                stop_on_issues = TRUE) {
   
   K_mode <- match.arg(K_mode)
-  if (is.null(K_map)) stop("Devi passare K_map (es. list(Mobility=3, ..., Kneeling=5, ...)).")
-  
+  if (is.null(K_map)) stop("K_map needed (e.g., list(Mobility=3, ..., Kneeling=5, ...)).")
+
+  #extract parameter vector, hessian, and subject level scores
   sanitize <- function(x) {
     x <- gsub("\\s+", "_", x)
     gsub("[^[:alnum:]_]+", "", x)
   }
-  
+
+  #store diagnostic issues
   .issues = list()
   
+  #clean names for stable matching
   .count_bad <- function(x) {
     if (is.null(x)) return(c(na=0L,nan=0L,inf=0L))
     if (is.vector(x)) x <- as.numeric(x)
@@ -34,14 +39,16 @@ extract_params_vec <- function(res,
       inf = sum(is.infinite(x))
     )
   }
-  
+
+  #save and optionally stop on bad values
   .flag = function(tag, cnt) {
     .issues[[tag]] <<- cnt
     bad <- sum(cnt)
     if (isTRUE(report_issues) && bad > 0) warning(tag, ": na=", cnt["na"], " nan=", cnt["nan"], " inf=", cnt["inf"])
     if (isTRUE(stop_on_issues) && bad > 0) stop(tag, ": na/nan/inf presenti")
   } 
-  
+
+  #parse pair items from file name if needed
   .parse_items_from_obj <- function(obj_name) {
     nm <- sub("\\.rds$", "", basename(obj_name))
     nm <- sub("^[0-9]+_", "", nm)
@@ -50,7 +57,8 @@ extract_params_vec <- function(res,
     list(item1 = sp[1], item2 = sp[2])
   }
   
-  # --- K helper (MAP consigliato per il bivariato) ---
+  
+  #retrieve number of categories for an item
   get_K <- function(dat, item_raw) {
     item_raw <- as.character(item_raw)
     
@@ -77,6 +85,7 @@ extract_params_vec <- function(res,
     length(unique(yv[!is.na(yv)]))
   }
   
+  # extract pair item names from res$pair or file name
   .get_items_pair <- function(res, obj_name) {
     p <- res$pair
     
@@ -103,6 +112,7 @@ extract_params_vec <- function(res,
     list(item1 = sp[1], item2 = sp[2])
   }
   
+  # pair metadata
   pair_get <- function(pair, nm) {
     if (is.null(pair)) return(NULL)
     
@@ -116,6 +126,7 @@ extract_params_vec <- function(res,
     pair[[nm]]
   }
   
+  #more flexible item extraction for mixed pair types
   .get_pair_items_any <- function(res) {
     p <- res$pair
     
@@ -142,12 +153,15 @@ extract_params_vec <- function(res,
     list(item1 = ord_item, item2 = cont_item)
   }
   
+  
+  #detect ordinal normal pair with residual rho
   .is_ord_norm_rho_fit <- function(res, obj_name) {
     pp <- .get_items_pair(res, obj_name)
     is_cont <- !is.na(pp$item2) && !(pp$item2 %in% names(K_map))
     isTRUE(is_cont && !is.null(res$fit$gammas) && length(res$fit$gammas) > 0)
   }
   
+  #build phi names for ordinal continuous pair
   .make_phi_names_ord_norm_rho <- function(ord_item_raw, cont_item_raw, K_ord) {
     c(
       paste0("threshold_", sanitize(ord_item_raw), "_cut:", seq_len(K_ord - 1L)),
@@ -156,6 +170,7 @@ extract_params_vec <- function(res,
     )
   }
   
+  #extract item name for survival fits
   get_item_surv = function(res) {
     it <- pair_get(res$pair, "item")
     if (!is.null(it) && length(it) >= 1 && !is.na(it[1])) return(as.character(it[1]))
@@ -169,6 +184,7 @@ extract_params_vec <- function(res,
     stop("Impossible to find item for fit SURV (missing pair$item e data$item).")
   }
   
+  #detect survival pairs from file name, betas, or D labels
   has_SURV_fit <- function(res, obj_name) {
     if (!is.null(obj_name) && grepl("SURV", obj_name, ignore.case = TRUE)) return(TRUE)
     
@@ -181,8 +197,10 @@ extract_params_vec <- function(res,
     FALSE
   }
   
+  #name of the continuous outcome used in mixed pairs
   CONT_OUTCOME <- "Perceivedcurrenthealthstatus"
   
+  #retrieve continuous outcome name
   get_cont_outcome <- function(dat, obj_name = NULL) {
     if (!is.null(dat) && CONT_OUTCOME %in% names(dat)) return(CONT_OUTCOME)
     if (!is.null(obj_name)) {
@@ -192,11 +210,13 @@ extract_params_vec <- function(res,
     CONT_OUTCOME
   }
   
+  #detect continuous survival model
   is_CONT_SURV_fit <- function(res, obj_name) {
     has_SURV_fit(res, obj_name) &&
       any(grepl("(^|:)is_cont(:|$)", names(res$fit$coefficients)))
   }
   
+  #detect ordinal beta pair from fit structure
   .is_ord_beta_pair <- function(fit) {
     dat <- fit$data
     if (is.null(dat)) return(FALSE)
@@ -207,6 +227,7 @@ extract_params_vec <- function(res,
     isTRUE(has_ord && has_cont && nphi >= 2)
   }
   
+  #guess which item is ordinal and which is continuous
   .ord_beta_items <- function(fit) {
     dat <- fit$data
     levs <- levels(dat$item)
@@ -219,8 +240,8 @@ extract_params_vec <- function(res,
     cont_item <- levs[which.max(cont_counts)]
     list(ord_item = ord_item, cont_item = cont_item)
   }
-
-                          
+  
+  #parse D_ij names from vcov output                
   .parse_Dij <- function(x) {
     tok <- sub("^D_", "", x)
     pr  <- strsplit(tok, "_", fixed = TRUE)[[1]]
@@ -229,24 +250,25 @@ extract_params_vec <- function(res,
     } else {
       m <- regexec("^([0-9]+)([0-9]+)$", tok)
       r <- regmatches(tok, m)[[1]]
-      if (length(r) != 3) stop("Formato D non riconosciuto: ", x)
       i <- as.integer(r[2]); j <- as.integer(r[3])
     }
     c(i = i, j = j)
   }
 
-                          
+             
+  #parse random effect labels           
   parse_z_pair_any <- function(z, items_map) {
     z0 <- sub("^zi_", "", z)  
     m  <- regexec("^z([12])(I0|Ipost)$", z0)
     r  <- regmatches(z0, m)[[1]]
-    if (length(r) != 3) stop("Nome RE non riconosciuto (atteso z1I0/z1Ipost/z2I0/z2Ipost con opzionale zi_): ", z)
     idx  <- as.integer(r[2])
     when <- r[3]
     item <- items_map[as.character(idx)]
     list(item = item, when = when, idx = idx)
   }
   
+  
+  # translate D_ij names into readable variance covariance names
   D_raw_from_Dij <- function(D_name, D_mat) {
     ij <- .parse_Dij(D_name)
     ii <- min(ij[1], ij[2])
@@ -288,7 +310,7 @@ extract_params_vec <- function(res,
         }
       }
     } else {
-      # PAIR branch
+      #PAIR branch
       pp <- .get_items_pair(res, obj_name)
       items_raw <- c(pp$item1, pp$item2)
       items_map <- setNames(sanitize(items_raw), c("1","2"))
@@ -312,7 +334,7 @@ extract_params_vec <- function(res,
   }
   
   
-  # CHOL vector da D
+  #convert D matrix into log chol diag and chol off diagonal vector for survival fits
   chol_from_D_SURV <- function(D, item_sanit) {
     dn <- rownames(D)
     
@@ -352,7 +374,8 @@ extract_params_vec <- function(res,
     c(out, setNames(off_vals, off_names))
   }
 
-                     
+                
+  #same conversion for pair fits     
   chol_from_D_PAIR <- function(D, items_raw) {
     dn <- rownames(D)
     items_map <- setNames(sanitize(items_raw), as.character(seq_along(items_raw)))
@@ -388,7 +411,7 @@ extract_params_vec <- function(res,
   }
 
                      
-  # rename betas (stacked)
+  # rename fixed effects
   rename_betas <- function(betas, has_SURV, item_raw) {
     bnames <- names(betas)
     
@@ -434,7 +457,8 @@ extract_params_vec <- function(res,
     betas
   }
 
-                     
+           
+  #rename betas in bivariate pair fits          
   rename_betas_bivar_pair <- function(vec, item_raw) {
     nm <- names(vec)
     if (is.null(nm)) nm <- paste0("V", seq_along(vec))
@@ -443,7 +467,7 @@ extract_params_vec <- function(res,
   }
   
  
-  # phis names helpers (e.g. thresholds)
+  # phis names  (e.g. thresholds)
   make_phi_names_SURV <- function(item_raw, K) {
     item <- sanitize(item_raw)
     c(paste0("threshold_", item, "_cut:", seq_len(K - 1L)),
@@ -472,16 +496,18 @@ extract_params_vec <- function(res,
   }
   
   
-  #  pair ordinal + rho residual (Fisher-z)
+  
+  #wrapper for pair ordinal plus residual correlation
   make_phi_names_pairord_rho <- function(item1_raw, item2_raw, K1, K2) {
     make_phi_names_pairord(item1_raw, item2_raw, K1, K2, with_resid_corr = TRUE)
   }
   
   
-  # CORE: pars_chol
+  #main extractor for parameters in a common vector
   core_extract <- function() {
     has_SURV <- has_SURV_fit(res, obj_name)
     
+    #survival with continuous longitudinal outcome
     if (has_SURV) {
       if (is_CONT_SURV_fit(res, obj_name)) {
         base_raw <- get_cont_outcome(res$fit$data, obj_name)
@@ -495,6 +521,7 @@ extract_params_vec <- function(res,
         return(c(betas, phis, D_chol))
       }
       
+      #survival with ordinal longitudinal outcome
       item_raw <- get_item_surv(res)
       betas <- rename_betas(res$fit$coefficients, has_SURV = TRUE, item_raw = item_raw)
       
@@ -507,6 +534,7 @@ extract_params_vec <- function(res,
       return(c(betas, phis, D_chol))
     }
     
+    #ordinal continuous pair with residual rho
     if (.is_ord_norm_rho_fit(res, obj_name)) {
       pp <- .get_items_pair(res, obj_name)
       ord_item_raw  <- pp$item1
@@ -529,6 +557,7 @@ extract_params_vec <- function(res,
       return(c(bet1, bet2, phis, D_chol))
     }
     
+    #ordinal beta pair    
     if (.is_ord_beta_pair(res$fit)) {
       
       pp <- .get_items_pair(res, obj_name)
@@ -553,7 +582,7 @@ extract_params_vec <- function(res,
       return(c(betas, phis, D_chol))
     }
     
-    
+    #pair of ordinal outcomes
     pp <- .get_items_pair(res, obj_name)
     items_raw <- c(pp$item1, pp$item2)
     
@@ -562,7 +591,7 @@ extract_params_vec <- function(res,
     
     phis <- res$fit$phis
     
-    # if gammas are available (i.e., residual correlation)
+    #pair ordinal with residual correlation
     if (!is.null(res$fit$gammas) && length(res$fit$gammas) > 0) {
       bet1 <- rename_betas_bivar_pair(res$fit$coefficients, items_raw[1])
       bet2 <- rename_betas_bivar_pair(res$fit$gammas,       items_raw[2])
@@ -575,7 +604,7 @@ extract_params_vec <- function(res,
       return(c(bet1, bet2, phis, D_chol))
     }
 
-    # without residual correlation
+    #pair ordinal without residual correlation
     betas <- rename_betas(res$fit$coefficients, has_SURV = FALSE, item_raw = NULL)
     stopifnot(length(phis) == (K1 - 1L) + (K2 - 1L))
     names(phis) <- make_phi_names_pairord(items_raw[1], items_raw[2], K1, K2)
@@ -584,11 +613,12 @@ extract_params_vec <- function(res,
     c(betas, phis, D_chol)
   }
   
+  # extract parameters and check for bad values
   pars_chol <- core_extract()
   .flag("pars", .count_bad(pars_chol))
   if (!isTRUE(return_scores)) return(pars_chol)
   
-  # Hessian rename and reorder
+  #rename and reorder hessian to match extracted parameters
   H_pretty <- res$fit$Hessian
   .flag("H", .count_bad(H_pretty))
   
@@ -682,6 +712,7 @@ extract_params_vec <- function(res,
     vec
   }
   
+  #relabel hessian rows and columns, then reorder blocks
   if (!is.null(dim(H_pretty))) {
     cn <- colnames(H_pretty); rn <- rownames(H_pretty)
     
@@ -706,12 +737,11 @@ extract_params_vec <- function(res,
     d_cols <- d_cols[!is.na(d_cols)]
     
     
-                                            
+    #beta block
     b_old <- names(res$fit$coefficients)
     beta_cols <- match(b_old, cn); beta_cols <- beta_cols[!is.na(beta_cols)]
     
-   
-                                            
+    #gamma block if present                
     gamma_cols <- integer(0)
     g_old <- if (!is.null(res$fit$gammas)) names(res$fit$gammas) else NULL
     if (!is.null(g_old) && length(g_old)) {
@@ -721,6 +751,7 @@ extract_params_vec <- function(res,
       gamma_cols <- setdiff(gamma_cols, beta_cols)
     }
     
+    #reorder as beta gamma D phi other
     keep_core <- c(beta_cols, gamma_cols, d_cols, phi_cols)
     keep_core <- keep_core[!is.na(keep_core)]
     other_cols <- setdiff(seq_along(cn), keep_core)
@@ -730,8 +761,7 @@ extract_params_vec <- function(res,
     perm <- unique(perm)
     H_pretty <- H_pretty[perm, perm, drop = FALSE]
     
-    # rename betas e gammas in H 
-    # betas: fixed_<item1>_<cov>
+    #rename beta and gamma blocks in hessian
     pp <- .get_items_pair(res, obj_name)
     it1_raw <- pp$item1
     it2_raw <- pp$item2
@@ -793,19 +823,22 @@ extract_params_vec <- function(res,
     rownames(H_pretty) <- rename_phi(rownames(H_pretty))
   }
   
-  # gradient (same as in H_pretty)
+  
+  #extract subject level score contributions
   IDfac <- res$fit$id$ID
   Sb <- res$fit$score_vect_contributions$score.betas
   Sg <- if (!is.null(res$fit$score_vect_contributions$score.gammas)) res$fit$score_vect_contributions$score.gammas else NULL
   Sp <- res$fit$score_vect_contributions$score.phis
   SD <- res$fit$score_vect_contributions$score.D
   
+  #reference subject ids
   ids <- {
     pm <- res$fit$post_modes
     if (!is.null(pm) && !is.null(rownames(pm))) rownames(pm)
     else unique(as.character(IDfac))
   }
   
+  #align score matrices to a common id set
   align_rows <- function(M, ids) {
     if (is.null(M)) return(NULL)
     M <- as.matrix(M)
@@ -823,7 +856,7 @@ extract_params_vec <- function(res,
     out
   }
   
-  # ---- betas ----
+  #aggregate beta scores by subject
   Gb <- if (!is.null(Sb)) {
     .flag("score.betas", .count_bad(Sb))
     tmp <- rowsum(Sb, group = IDfac, na.rm = FALSE)
@@ -857,7 +890,7 @@ extract_params_vec <- function(res,
     tmp
   } else NULL
   
-  # gammas 
+  #aggregate gamma scores if present
   Gg = if (!is.null(Sg)) {
     .flag("score.gammas", .count_bad(Sg))
     tmp <- rowsum(Sg, group = IDfac, na.rm = FALSE)
@@ -875,7 +908,7 @@ extract_params_vec <- function(res,
     tmp
   } else NULL
   
-  #phis 
+  #aggregate phi scores
   Gp <- if (!is.null(Sp)) {
     .flag("score.phis", .count_bad(Sp))
     tmp <- rowsum(Sp, group = IDfac, na.rm = FALSE)
@@ -886,7 +919,7 @@ extract_params_vec <- function(res,
     tmp
   } else NULL
   
-  # D 
+  #use D scores already at subject level
   GD <- if (!is.null(SD)) {
     .flag("score.D", .count_bad(SD))
     tmp <- as.matrix(SD)
@@ -906,11 +939,13 @@ extract_params_vec <- function(res,
     tmp
   } else NULL
   
+  #align blocks to same subject set
   Gb <- align_rows(Gb, ids)
   Gg <- align_rows(Gg, ids)
   GD <- align_rows(GD, ids)
   Gp <- align_rows(Gp, ids)
   
+  #combine score blocks
   blocks <- Filter(function(x) !is.null(x) && ncol(x) > 0, list(Gb, Gg, GD, Gp))
   
   G_all  <- if (length(blocks)) do.call(cbind, blocks) else NULL
@@ -922,6 +957,7 @@ extract_params_vec <- function(res,
     .flag("grad", .count_bad(G_all))
   }
   
+  #reorder gradient columns to match hessian
   if (!is.null(G_all) && !is.null(H_pretty) && length(colnames(H_pretty))) {
     target <- colnames(H_pretty)
     cnG <- colnames(G_all)
@@ -935,6 +971,8 @@ extract_params_vec <- function(res,
     
     if (length(ord)) G_all <- G_all[, ord, drop = FALSE]
   }  
+                   
+  #final check between hessian and gradient names
   if (!is.null(G_all) && !is.null(H_pretty)) {
     miss_in_grad <- setdiff(colnames(H_pretty), colnames(G_all))
     extra_in_grad <- setdiff(colnames(G_all), colnames(H_pretty))
@@ -947,10 +985,13 @@ extract_params_vec <- function(res,
       stop("mismatch colonne tra H e grad")
     }
   }
+                   
+  #return parameter vector, score matrix, hessian, and issues
   list(pars = pars_chol, grad = G_all, H = H_pretty, issues = .issues)
 }
 
 
+#read one saved fit and extract the cleaned objects
 process_one <- function(fp, K_map) {
   res <- readRDS(fp)
   
@@ -979,7 +1020,8 @@ process_one <- function(fp, K_map) {
 ##      J and K matrices          ##
 ######                       #######
 ####################################
-
+          
+#### build J, K, and sandwich covariance across all pairs
 JK_all_pairs <- function(ex_list, hessian_of = c("neglogLik", "logLik")) {
   hessian_of <- match.arg(hessian_of)
 
@@ -996,44 +1038,48 @@ JK_all_pairs <- function(ex_list, hessian_of = c("neglogLik", "logLik")) {
     ex <- ex_list[[p]]
     U <- as.matrix(ex$grad)
     H <- as.matrix(ex$H)
-    
-    U[is.na(U)] <- 0
+
     H <- 0.5 * (H + t(H))
 
     
+    #align gradient columns to hessian columns
     if (!is.null(colnames(H)) && !is.null(colnames(U))) {
       tgt <- colnames(H)
       miss <- setdiff(tgt, colnames(U))
-      if (length(miss)) stop("Pair ", p, ": grad manca colonne in H: ", paste(miss, collapse=", "))
+      if (length(miss)) stop("Pair ", p, ": grad missing columns in H: ", paste(miss, collapse=", "))
       U <- U[, tgt, drop = FALSE]
       H <- H[tgt, tgt, drop = FALSE]
     } else {
       if (ncol(U) != ncol(H)) stop("Pair ", p, ": mismatch grad/H.")
     }
     
+    #embed each pair score into common subject space
     U_big <- matrix(0, nrow = N, ncol = ncol(U), dimnames = list(ids_all, colnames(U)))
     rr <- match(rownames(U), ids_all)
     U_big[rr, ] <- U
+
     
+    #pair specific sensitivity block
      Jp <- if (hessian_of == "neglogLik") (1/N) * H else -(1/N) * H
     
     J_blocks[[p]] <- Jp
     U_blocks[[p]] <- U_big
   }
-  
-  # concatenate score blocks: U_all = [U_1 | U_2 | ...]
+
+  # stack all score blocks
   U_all <- do.call(cbind, U_blocks)
   
   theta_names <- colnames(U_all)
   
-  # J
+  #block diagonal J
   J <- as.matrix(Matrix::bdiag(lapply(J_blocks, Matrix::Matrix)))
   dimnames(J) <- list(theta_names, theta_names)
   
-  # K 
+  #empirical K from subject scores
   K <- crossprod(U_all) / N
   dimnames(K) <- list(theta_names, theta_names)
   
+  #sandwich covariance
   J_inv <- solve(J)
   Sigma <- J_inv %*% K %*% t(J_inv)
   
@@ -1045,15 +1091,8 @@ JK_all_pairs <- function(ex_list, hessian_of = c("neglogLik", "logLik")) {
 
 
 
-
-########################################################
-######                                           #######
-##      from  LL' and diag(L))=logdiag(L)             ##
-##        to D  for each pair                         ##
-######                                           #######
-########################################################
-
-                                  
+           
+#add pair tag to all parameter names to keep them unique across pairs                       
 prefix_ex <- function(ex, tag) {
   stopifnot(!is.null(ex$pars), !is.null(ex$H), !is.null(ex$grad))
   
@@ -1072,14 +1111,18 @@ prefix_ex <- function(ex, tag) {
   ex
 }
 
+                                  
+#retrieve parameter vector in exact hessian order
 theta_in_H_order <- function(ex) {
   theta <- ex$pars[colnames(ex$H)]
   stopifnot(identical(names(theta), colnames(ex$H)))
   theta
 }
-                                  
+    
+#remove pair tag
 strip_tag <- function(nm) sub("^.*::", "", nm)
 
+#rebuild variance covariance parameters from cholesky representation
 chol_named_to_varcov <- function(chol_vec, chol_names_prefixed) {
   nms0 <- strip_tag(chol_names_prefixed)
   vals <- setNames(as.numeric(chol_vec), nms0)
@@ -1092,16 +1135,16 @@ chol_named_to_varcov <- function(chol_vec, chol_names_prefixed) {
   
   re_labels <- sub("^log_chol_var_", "", diag_names)
   
-  # L con dimnames = re_labels
+   #lower triangular factor
   L <- matrix(0, q, q, dimnames = list(re_labels, re_labels))
   
-  # diag(L)
+  #diagonal from log scale
   for (nm in diag_names) {
     lab <- sub("^log_chol_var_", "", nm)
     L[lab, lab] <- exp(vals[[nm]])
   }
   
-  # parser nomi off-diagonal -> due label
+  #parse off diagonal names into the corresponding labels
   re_from_cov <- function(nm, re_labels) {
     s <- sub("^chol_cov_", "", nm)
     
@@ -1113,7 +1156,7 @@ chol_named_to_varcov <- function(chol_vec, chol_names_prefixed) {
       return(c(paste0(item, "_", when), "frailty"))
     }
     
-    # cross: chol_cov_cross_<ItemA>_<ItemB>_<TA>_<TB>
+    # cross item covariances: chol_cov_cross_<ItemA>_<ItemB>_<TA>_<TB>
     if (startsWith(s, "cross_")) {
       core <- sub("^cross_", "", s)
       toks <- strsplit(core, "_", fixed = TRUE)[[1]]
@@ -1141,7 +1184,7 @@ chol_named_to_varcov <- function(chol_vec, chol_names_prefixed) {
     c(paste0(item, "_", t1), paste0(item, "_", t2))
   }
   
-  # off-diagonal: L[j,i] con j>i
+  #fill lower triangle
   for (nm in off_names) {
     labs2 <- re_from_cov(nm, re_labels)
     i1 <- match(labs2[1], re_labels)
@@ -1165,7 +1208,8 @@ chol_named_to_varcov <- function(chol_vec, chol_names_prefixed) {
 }
 
 
-#### First delta method from chol+log to var-cov
+
+#first delta method from cholesky scale to variance covariance scale
 make_G_pair <- function(ex_pref) {
   theta <- theta_in_H_order(ex_pref)
   
@@ -1177,8 +1221,10 @@ make_G_pair <- function(ex_pref) {
   varcov0 <- chol_named_to_varcov(theta[chol_names], chol_names)
   varcov_names <- paste0(tag, "::", names(varcov0))
   
+   # target parameter vector for one pair
   psi_names <- c(nonchol_names, varcov_names)
   
+  #numeric jacobian of the transformation
   gD <- function(x) {
     out <- chol_named_to_varcov(x, chol_names)
     as.numeric(out)
@@ -1187,31 +1233,31 @@ make_G_pair <- function(ex_pref) {
   rownames(JD) <- names(varcov0)
   colnames(JD) <- strip_tag(chol_names)  
   
+  # mapping matrix from theta to psi
   G <- Matrix(0, nrow = length(psi_names), ncol = length(theta),
               dimnames = list(psi_names, names(theta)), sparse = TRUE)
   
-  
-  
+  #identity for unchanged parameters
   idx_r <- match(nonchol_names, psi_names)
   idx_c <- match(nonchol_names, names(theta))
   G[cbind(idx_r, idx_c)] <- 1
   
+  #delta block for transformed D parameters
   r_vc <- match(varcov_names, psi_names)
   c_ch <- match(chol_names, names(theta))
-
-  
   G[r_vc, c_ch] <- JD
   
   list(G = G, psi_names = psi_names)
 }
 
+#prepare global transformed vector and covariance
 predelta_prepare <- function(ex_list, pair_tags, jk_vcov_theta) {
   stopifnot(length(ex_list) == length(pair_tags))
-
   
+  #prefix each pair
   ex_pref <- Map(prefix_ex, ex_list, pair_tags)
-
   
+  #reorder pars to match hessian
   ex_pref <- lapply(ex_pref, function(ex) {
     ex$pars <- ex$pars[colnames(ex$H)]
     stopifnot(identical(names(ex$pars), colnames(ex$H)))
@@ -1238,14 +1284,13 @@ predelta_prepare <- function(ex_list, pair_tags, jk_vcov_theta) {
     psi_list[[i]] <- psi[tmp$psi_names]
   }
 
-
-  
+ #block diagonal global G
   G_all <- as.matrix(Matrix::bdiag(G_list))
-
   
+  #stack transformed parameters
   psi_all <- unlist(psi_list, use.names = TRUE)
-
   
+  #transform covariance
   stopifnot(ncol(jk_vcov_theta) == ncol(G_all))
   V_psi <- G_all %*% jk_vcov_theta %*% t(G_all)
   V_psi <- 0.5 * (V_psi + t(V_psi))
@@ -1267,26 +1312,22 @@ predelta_prepare <- function(ex_list, pair_tags, jk_vcov_theta) {
 ###########################################################
 
 
-
+#build averaging matrix A for duplicated parameters across pairs
 build_A <- function(est_vec,
-                    canonicalizer   = identity,
-                    element_weights = NULL,
-                    make_unique_cols = TRUE,
-                    tol_row_sum = 1e-10) {
-  if (is.null(names(est_vec))) stop("est_vec deve avere names().")
+                    canonicalizer= identity,
+                    element_weights = NULL) {
   raw_names <- names(est_vec)
+    
+  #global canonical names
+  canon_names =canonicalizer(raw_names)
   
-  canon_names <- canonicalizer(raw_names)
-  if (anyNA(canon_names)) stop("Ci sono nomi NA dopo canonicalizer().")
-
-  
-  levels <- unique(canon_names)
-
-  
+  #unique global parameters
+  levels<- unique(canon_names)
+  #row and column locations
   row_index <- match(canon_names, levels)
   col_index <- seq_along(est_vec)
 
-  
+  #weights for averaging
   if (is.null(element_weights)) {
     element_weights <- rep(1, length(est_vec))
   } else {
@@ -1295,37 +1336,22 @@ build_A <- function(est_vec,
       stop("element_weights must be finite and >= 0.")
   }
 
-  
-  denom <- numeric(length(levels))
+  #normalize weights within each canonical parameter
+  denom = numeric(length(levels))
   denom_by_row <- tapply(element_weights, row_index, sum)
   denom[as.integer(names(denom_by_row))] <- denom_by_row
-
   
+  weights =element_weights / denom[row_index]
   
-  weights <- element_weights / denom[row_index]
+  col_names <- make.unique(raw_names, sep = "__") 
   
-  # nomi colonna univoci (consigliato)
-  col_names <- if (make_unique_cols) make.unique(raw_names, sep = "__") else raw_names
-  
-  A <- Matrix::sparseMatrix(
-    i = row_index,
-    j = col_index,
-    x = weights,
-    dims = c(length(levels), length(est_vec)),
-    dimnames = list(levels, col_names)
-  )
-  
-  rs <- as.numeric(A %*% rep(1, length(est_vec)))
-  bad <- which(abs(rs - 1) > tol_row_sum)
-  if (length(bad)) {
-    warning(sprintf("Unnormalized rows (first 10): %s",
-                    paste(head(rownames(A)[bad], 10), collapse = ", ")))
-  }
-  
+  #sparse averaging matrix
+  A <- Matrix::sparseMatrix(i = row_index,j= col_index,x = weights,dims = c(length(levels), length(est_vec)), dimnames = list(levels, col_names))
   A
 }
 
 
+#replace cholesky parameters with variance covariance parameters
 theta_pair_allpars <- function(ex, do_check = TRUE) {
   p <- ex$pars
   stopifnot(!is.null(names(p)))
@@ -1350,7 +1376,8 @@ theta_pair_allpars <- function(ex, do_check = TRUE) {
   theta
 }
 
-                                  
+      
+#canonicalize names so the same covariance has one unique label                            
 canonicalizer_all <- function(nms) {
   nms <- sub("^.*::", "", nms)
 
@@ -1367,14 +1394,12 @@ canonicalizer_all <- function(nms) {
   nms
 }
 
-##############################################################
-# Transformation in the scale of interest for the parameters #
-##############################################################
 
+#transform estimates into the scale of interest                                  
 derive_interest <- function(psi) {
   out <- c()
   
-  # SD da var_*
+  #standard deviations from variances
   var_names <- grep("^var_", names(psi), value = TRUE)
   for (vn in var_names) {
     v <- psi[[vn]]
@@ -1382,7 +1407,7 @@ derive_interest <- function(psi) {
     out[paste0("sd_", sub("^var_", "", vn))] <- sqrt(v)
   }
   
-  #corr from cov_*
+  #correlations from covariances
   cov_names <- grep("^cov_", names(psi), value = TRUE)
   for (cn in cov_names) {
     ab <- strsplit(sub("^cov_", "", cn), "__", fixed = TRUE)[[1]]
@@ -1393,7 +1418,7 @@ derive_interest <- function(psi) {
     out[paste0("corr_", A, "__", B)] <- if (denom > 0) psi[[cn]] / denom else NA_real_
   }
   
-  # Fisher z -> rho for residual correlation
+  #residual correlations from fisher z
   atanh_names <- grep("^atanh_rho_resid__", names(psi), value = TRUE)
   for (nm in atanh_names) {
     pair <- sub("^atanh_rho_resid__", "", nm)
@@ -1413,6 +1438,7 @@ derive_interest <- function(psi) {
   blogphi <- grep("^beta_log_precision_", names(psi), value = TRUE)
   for (pn in blogphi) out[paste0("phi_", sub("^beta_log_precision_", "", pn))] <- exp(psi[[pn]])
   
+  #continuous outcome (normal) sigma
   logsig_names <- grep("^log_sigma_", names(psi), value = TRUE)
   for (sn in logsig_names) {
     out[paste0("sigma_", sub("^log_sigma_", "", sn))] <- exp(psi[[sn]])
@@ -1421,17 +1447,17 @@ derive_interest <- function(psi) {
   out
 }
 
-# Jacobian numeric
+                                  
+#numeric jacobian helper for transformed parameters
 g <- function(x) {
   tmp <- psi_global
   tmp[names(x)] <- x
   as.numeric(derive_interest(tmp))
 }
 
-#### Reconstruct vector with trasfomed and untrasfomed estimates with corresponding VCOV matrix
+#combine transformed and untransformed parameters in one vector and vcov
 build_interest_full <- function(psi_global, V_global,
-                                est_trans, J_trans,
-                                keep_untransformed = NULL,
+                                est_trans, J_trans,keep_untransformed = NULL,
                                 drop_untransformed_regex = NULL,
                                 out_order = NULL,
                                 symmetrize = TRUE) {
@@ -1448,6 +1474,7 @@ build_interest_full <- function(psi_global, V_global,
   stopifnot(is.matrix(J_trans))
   stopifnot(identical(colnames(J_trans), names(psi_global)))
   
+  #keep only transformed parameters available in the jacobian
   trans_names <- intersect(names(est_trans), rownames(J_trans))
  
   missing_in_J <- setdiff(names(est_trans), rownames(J_trans))
@@ -1455,7 +1482,7 @@ build_interest_full <- function(psi_global, V_global,
   est_trans <- est_trans[trans_names]
   J_trans   <- J_trans[trans_names, , drop = FALSE]
 
-  
+  #decide which original parameters to retain
   if (is.null(keep_untransformed)) keep_untransformed <- names(psi_global)
   keep_untransformed <- intersect(keep_untransformed, names(psi_global))
 
@@ -1474,25 +1501,23 @@ build_interest_full <- function(psi_global, V_global,
     out_names <- out_order
   }
 
-  
+  #final estimates
   est_full <- setNames(rep(NA_real_, length(out_names)), out_names)
   est_full[keep_untransformed] <- psi_global[keep_untransformed]
   est_full[trans_names]        <- est_trans[trans_names]
 
-  
+    #full jacobian
   J_full <- matrix(0, nrow = length(out_names), ncol = length(psi_global),
                    dimnames = list(out_names, names(psi_global)))
-
   
+  #identity for retained untransformed parameters
   idx_r <- match(keep_untransformed, out_names)
   idx_c <- match(keep_untransformed, names(psi_global))
   J_full[cbind(idx_r, idx_c)] <- 1
 
-  
+  #insert transformed jacobian block
   J_full[trans_names, ] <- J_trans[trans_names, , drop = FALSE]
-  
-
-  
+    #propagate covariance
   V_full <- J_full %*% V_global %*% t(J_full)
   if (isTRUE(symmetrize)) V_full <- 0.5 * (V_full + t(V_full))
   
@@ -1504,21 +1529,17 @@ build_interest_full <- function(psi_global, V_global,
 
 
 
-#####
-# Var covar radnom effects
-#################################
-# Build D (var-cov matrix) from psi (var_*, cov_*)
-#########################################
-re_varcov_matrix2 <- function(psi,
-                              strip_tag = TRUE,
+
+#rebuild D and correlation matrices from var and cov parameters
+re_varcov_matrix2 <- function(psi, strip_tag = TRUE,
                               fill_missing = "NA",
                               order = c("appearance", "sorted"),
-                              label_filter = NULL,   # es: "(_I0|_Ipost|frailty)$"
+                              label_filter = NULL,   # e.g.: "(_I0|_Ipost|frailty)$"
                               make_psd = FALSE) {
   fill_missing <- match.arg(fill_missing)
   order <- match.arg(order)
   
-  if (is.null(names(psi))) stop("psi deve avere names().")
+  if (is.null(names(psi))) stop("psi must have names().")
   
   nms <- names(psi)
   if (strip_tag) nms <- sub("^.*::", "", nms)
@@ -1530,10 +1551,10 @@ re_varcov_matrix2 <- function(psi,
   if (length(var_nms) == 0 && length(cov_nms) == 0)
     stop("Nessun var_* o cov_* trovato in psi.")
 
-  
+  #labels from diagonal variances
   labs_var <- sub("^var_", "", var_nms)
-
   
+  #labels appearing in covariances
   cov_pairs <- lapply(cov_nms, function(cn) {
     s <- sub("^cov_", "", cn)
     parts <- strsplit(s, "__", fixed = TRUE)[[1]]
@@ -1544,8 +1565,8 @@ re_varcov_matrix2 <- function(psi,
   })
   cov_pairs <- Filter(Negate(is.null), cov_pairs)
   labs_cov <- unique(unlist(lapply(cov_pairs, unname)))
-
   
+  #overall label set
   labs <- c(labs_var, labs_cov)
   if (order == "appearance") {
     labs <- unique(labs)
@@ -1563,9 +1584,10 @@ re_varcov_matrix2 <- function(psi,
   if (q == 0) stop("Dopo label_filter non resta nessuna dimensione.")
   
   
+  #initialize D
   D <- matrix(NA, q, q, dimnames = list(labs, labs))
   
-  #set diagonale (var)
+  #fill diagonal
   missing_var <- character(0)
   for (lab in labs) {
     vn <- paste0("var_", lab)
@@ -1576,7 +1598,7 @@ re_varcov_matrix2 <- function(psi,
     }
   }
   
-  #set off-diagonal (cov)
+  #fill off-diagonal (cov)
   unused_cov <- NA
   for (k in seq_along(cov_pairs)) {
     A <- cov_pairs[[k]]["A"]
@@ -1593,18 +1615,7 @@ re_varcov_matrix2 <- function(psi,
     D[B, A] <- val
   }
   
-  # simmetrizza
-  # D <- 0.5 * (D + t(D))
-  
-  # # opzional PSD
-  # if (make_psd) {
-  #   if (!requireNamespace("Matrix", quietly = TRUE))
-  #     stop("Per make_psd=TRUE serve il pacchetto Matrix.")
-  #   D <- as.matrix(Matrix::nearPD(D, corr = FALSE)$mat)
-  #   dimnames(D) <- list(labs, labs)
-  # }
-  
-  # correlazioni
+  #build correlation matrix
   sdv <- sqrt(pmax(diag(D), 0))
   Cor <- D / (sdv %o% sdv)
   diag(Cor) <- 1
@@ -1618,7 +1629,7 @@ re_varcov_matrix2 <- function(psi,
 }
 
 
-### residual error correlation matrix
+### Build residual correlation matrix from corr_resid names
 corr_resid_matrix_simple <- function(psi, base = "corr_resid", sep = "__") {
   if (is.null(names(psi))) stop("psi deve avere names().")
   
@@ -1653,7 +1664,8 @@ corr_resid_matrix_simple <- function(psi, base = "corr_resid", sep = "__") {
   R
 }
 
-### update correlations and sd in D after adjustment for SPD 
+
+#update sd and correlation or variance covariance estimates after adjusting D
 update_est_interest_from_D <- function(est_interest, Dadj, Corradj = NULL,
                                        representation = c("corr","cov"),
                                        prefix_sd = "sd_", prefix_corr = "corr_",
@@ -1677,14 +1689,14 @@ update_est_interest_from_D <- function(est_interest, Dadj, Corradj = NULL,
     x
   }
 
-  
+  #update sd and correlations
   if (representation == "corr") {
     
     if (is.null(Corradj)) Corradj <- cov2cor(Dadj)
     
     nms <- names(out)
-    
-    # SD
+  
+    #update sd_*
     is_sd <- startsWith(nms, prefix_sd)
     if (any(is_sd)) {
       idx  <- which(is_sd)
@@ -1698,7 +1710,7 @@ update_est_interest_from_D <- function(est_interest, Dadj, Corradj = NULL,
       out[idx[ok]] <- vals[ok]
     }
     
-    # CORR
+    #update corr_*
     nms <- names(out)
     is_corr <- startsWith(nms, prefix_corr)
     if (any(is_corr)) {
@@ -1727,15 +1739,15 @@ update_est_interest_from_D <- function(est_interest, Dadj, Corradj = NULL,
   }
 
   
+  #update variances and covariances
   if (representation == "cov") {
-
-    
+   
     out <- ensure_names(out, var_names)
     out <- ensure_names(out, cov_names)
     
     nms <- names(out)
-    
-    # VAR
+      
+    #update var_*
     is_var <- startsWith(nms, prefix_var)
     if (any(is_var)) {
       idx <- which(is_var)
@@ -1749,7 +1761,7 @@ update_est_interest_from_D <- function(est_interest, Dadj, Corradj = NULL,
       out[idx[ok]] <- vals[ok]
     }
     
-    # COV
+    #update cov_*
     nms <- names(out)
     is_cov <- startsWith(nms, prefix_cov)
     if (any(is_cov)) {
