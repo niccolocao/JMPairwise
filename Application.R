@@ -7,6 +7,10 @@ library(ggplot2)
 library(RColorBrewer)
 library(patchwork)
 library(tikzDevice)
+library(knitr)
+library(kableExtra)
+library(ggrepel)
+library(grid)
 source("pairaveFuns.R")
 
 
@@ -154,11 +158,58 @@ psi_adj_cov <- update_est_interest_from_D(
 
 
 
-# Complete table of results
-tab_stime <- make_table_est_se_items_rows(est_full_nocov, se_full_nocov, digits = 3)
-ù
 
-# Wald tests
+######### Table for all fixed effects (longitudinal submodel ############################################
+
+item_order <- setdiff(.default_base_order, "frailty")
+
+tab_items3 <- make_wald_table_3cols(
+  psi = psi_global,
+  se  = se_global,
+  alpha = 0.05,
+  predictors = c("I6","I12","wI6","wI12","pI6","pI12","diag_oa","sex01","loghosp_post","age"),
+  item_levels = item_order
+)
+
+
+# esempio mappa (opzionale) per rinominare le righe:
+item_map <- c(
+  Mobility = "Mobility",
+  SelfCare = "SelfCare",
+  UsualActivities = "UsualAct",
+  PainorDiscomfort = "PainDisc",
+  Anxietyordepression = "AnxDepr",   
+  Gettingoutofbed = "OutBed",
+  Puttingonsocks = "PutSocks",
+  Gettingupfromsitting = "UpSit", 
+  Bendingtowardthefloor_pickinguponobjectfromtheground="Bend",
+  Twisting_pivotingontheinjuredknee = "Twist",
+  Kneeling = "Kneel",
+  Squatting = "Squat"
+)
+
+
+preds <- c("I6","I12","wI6","wI12","pI6","pI12","diag_oa","sex01","loghosp_post","age")
+
+latex_tab <- make_latex_beta_table(
+  tab_items3,
+  predictors = preds,
+  item_name_map = item_map,   # oppure NULL
+  alpha = 0.05,
+  digits_est = 3,
+  digits_se  = 3,
+  caption = "Fixed effects by item (Wald test; $^{*}$ p<0.05).",
+  label   = "tab:fixed_items",
+  use_resizebox = TRUE
+)
+
+cat(latex_tab)
+
+
+
+
+
+#################################### Wald tests ########################################################
 tab <- wald_table_raw(est_interest_adj, se_interest, add_fdr_corr = TRUE)
 tab_use = tab
 
@@ -167,6 +218,26 @@ corr_frail <- est_interest_adj[grepl("frailty", names(est_interest_adj))]
 se_frail   <- se_interest[names(corr_frail)]
 
 tab_fisher <- wald_fisher_from_r(corr_frail, se_frail)
+
+
+
+################# Simultaneous Wald test on covariances  Cov(b_ik1, s_i) = Cov(b_ik2, s_i) = 0 for different subgroups of items
+EQ_items <- c("Mobility","SelfCare","UsualActivities","PainorDiscomfort","Anxietyordepression", "Perceivedcurrenthealthstatus")
+KOOS_items <- c("Gettingoutofbed","Gettingupfromsitting",
+                "Bendingtowardthefloor_pickinguponobjectfromtheground",
+                "Twisting_pivotingontheinjuredknee","Kneeling","Squatting","Puttingonsocks")
+
+res_wald <- wald_frailty_cov_suite(psi_global, se_global = se_global, V_global = V_global,
+                              EQ_items = EQ_items, KOOS_items = KOOS_items)
+
+
+res_wald$tests = res_wald$tests[,-2]
+kable(res_wald$tests,
+      format = "latex", booktabs = TRUE,
+      caption = "Wald tests congiunti: H0 corr(item, frailty)=0",
+      digits = c(0,3,0,3)) |>
+  kable_styling(latex_options = c("hold_position"))
+
 
 
 
@@ -179,7 +250,7 @@ tab_cd2 <- corrdiff_frailty_table_from_interest(
 tab_cd2
 
 
-###### Test on covariances Cor(b_ik2 - b_ik1, s_i) = 0 simultaneously
+###### Simultaneous Wald test on covariances Cov(b_ik2 - b_ik1, s_i) = 0 
 EQ_items <- c(
   "Mobility","SelfCare","UsualActivities",
   "PainorDiscomfort","Anxietyordepression",
@@ -227,21 +298,6 @@ res_shiftcov_EQ$p
 res_shiftcov_KOOS$W
 res_shiftcov_KOOS$df
 res_shiftcov_KOOS$p
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -430,4 +486,625 @@ p_resid
 tikz("/home/nc/MEGA/BioPsychometrics/biomlatex/residcor.tex", width = 6, height = 6, standAlone = FALSE,engine = "xetex")
 print(p_resid)
 dev.off()
+
+
+######################## Principal component analysis on correlation matrices ##############################################
+itemnamesEQ   <- c("Mobility","SelfCare","UsualAct","PainDisc","AnxDepr","Health")
+itemnamesKOOS <- c('OutBed','PutSocks','UpSit','Bend','Twist','Kneel','Squat')
+
+origEQ_full <- c(
+  "Mobility",
+  "SelfCare",
+  "UsualActivities",
+  "PainorDiscomfort",
+  "Anxietyordepression",
+  "Perceivedcurrenthealthstatus"
+)
+
+origKOOS_full <- c(
+  "Gettingoutofbed",
+  "Puttingonsocks",
+  "Gettingupfromsitting",
+  "Bendingtowardthefloor_pickinguponobjectfromtheground",
+  "Twisting_pivotingontheinjuredknee",
+  "Kneeling",
+  "Squatting"
+)
+
+short_map_full <- c(
+  setNames(itemnamesEQ, origEQ_full),
+  setNames(itemnamesKOOS, origKOOS_full)
+)
+
+cols_main <- c(
+  "EQ-5D_I0"    = "#0F766E",
+  "EQ-5D_Ipost" = "#d1a00d",
+  "KOOS_I0"     = "#5B21B6",
+  "KOOS_Ipost"  = "#52340b",
+  "Frailty"     = "#C2410C"
+)
+
+cols_resid <- c(
+  "EQ"   = "grey40",
+  "KOOS" = "#111111"
+)
+
+R_I0 <- Corradj[grepl("I0", rownames(Corradj)), grepl("I0", colnames(Corradj)), drop = FALSE]
+R_Ipost <- Corradj[grepl("Ipost", rownames(Corradj)), grepl("Ipost", colnames(Corradj)), drop = FALSE]
+
+R_resid <- corr_resid_matrix_simple(
+  est_interest_adj,
+  base = "corr_resid",
+  sep = "__"
+)
+
+ord_resid <- c(origEQ_full, origKOOS_full)
+ord_resid <- ord_resid[ord_resid %in% rownames(R_resid)]
+R_resid <- R_resid[ord_resid, ord_resid, drop = FALSE]
+R_resid <- 0.5 * (R_resid + t(R_resid))
+R_resid <- as.matrix(nearPD(R_resid, corr = TRUE)$mat)
+rownames(R_resid) <- colnames(R_resid) <- ord_resid
+
+
+xy_I0 <- get_pca_xy(R_I0)
+xy_Ipost <- get_pca_xy(R_Ipost)
+xy_resid <- get_pca_xy(R_resid)
+
+all_x <- c(0, xy_I0$x, xy_Ipost$x, xy_resid$x)
+all_y <- c(0, xy_I0$y, xy_Ipost$y, xy_resid$y)
+
+ref_all <- max(abs(c(all_x, all_y)))
+xlim_common <- range(all_x) + c(-0.06, 0.30) * ref_all
+ylim_common <- range(all_y) + c(-0.10, 0.10) * ref_all
+
+
+
+R_full <- Corradj[!grepl("frail", rownames(Corradj)), !grepl("frail", colnames(Corradj)), drop = FALSE]
+
+xy_full  <- get_pca_xy(R_full)
+xy_I0    <- get_pca_xy(R_I0)
+xy_Ipost <- get_pca_xy(R_Ipost)
+xy_resid <- get_pca_xy(R_resid)
+
+all_x <- c(0, xy_full$x, xy_I0$x, xy_Ipost$x, xy_resid$x)
+all_y <- c(0, xy_full$y, xy_I0$y, xy_Ipost$y, xy_resid$y)
+
+ref_all <- max(abs(c(all_x, all_y)))
+
+xlim_common_all <- range(all_x) + c(-0.06, 0.30) * ref_all
+ylim_common_all <- range(all_y) + c(-0.10, 0.10) * ref_all
+
+
+p_full <- pca_plot_grouped(
+  R_full,
+  main = "(a)",
+  short_map = short_map_full,
+  eq_base = origEQ_full,
+  koos_base = origKOOS_full,
+  mode = "timed",
+  show_suffix = FALSE,
+  xlim_fixed = xlim_common_all,
+  ylim_fixed = ylim_common_all,
+  label_size = 6,
+  axis_title_size = 10,
+  axis_text_size = 11,
+  plot_title_size = 19,
+  escape_tex = TRUE,
+  legend_text_size = 12
+)
+
+p_pca_I0 <- pca_plot_grouped(
+  R_I0,
+  main = "(b)",
+  short_map = short_map_full,
+  eq_base = origEQ_full,
+  koos_base = origKOOS_full,
+  mode = "timed",
+  show_suffix = FALSE,
+  xlim_fixed = xlim_common_all,
+  ylim_fixed = ylim_common_all,
+  label_size = 6,
+  axis_title_size = 9,
+  axis_text_size = 12,
+  plot_title_size = 19,
+  escape_tex = TRUE,
+  legend_text_size = 14
+)
+
+p_pca_Ipost <- pca_plot_grouped(
+  R_Ipost,
+  main = "(c)",
+  short_map = short_map_full,
+  eq_base = origEQ_full,
+  koos_base = origKOOS_full,
+  mode = "timed",
+  show_suffix = FALSE,
+  xlim_fixed = xlim_common_all,
+  ylim_fixed = ylim_common_all,
+  label_size = 6,
+  axis_title_size = 9,
+  axis_text_size = 12,
+  plot_title_size = 19,
+  escape_tex = TRUE,
+  legend_text_size = 14
+)
+
+p_pca_resid <- pca_plot_grouped(
+  R_resid,
+  main = "(d)",
+  short_map = short_map_full,
+  eq_base = origEQ_full,
+  koos_base = origKOOS_full,
+  mode = "resid",
+  show_suffix = FALSE,
+  xlim_fixed = xlim_common_all,
+  ylim_fixed = ylim_common_all,
+  label_size = 6,
+  axis_title_size = 9,
+  axis_text_size = 12,
+  plot_title_size = 19,
+  escape_tex = TRUE,
+  legend_text_size = 14
+)
+
+
+no_y_numbers <- theme(
+  axis.text.y = element_blank(),
+  axis.ticks.y = element_line(color = "black"),
+  axis.ticks.length.y = grid::unit(2.2, "mm")
+)
+
+p_all <- wrap_plots(
+  p_full,
+  p_pca_I0 + no_y_numbers,
+  p_pca_Ipost + no_y_numbers,
+  p_pca_resid + no_y_numbers,
+  ncol = 2,
+  byrow = TRUE
+) &
+  theme(
+    axis.title = element_text(size = 19),
+    legend.text = element_text(size = 18)
+  )
+
+out_tex <- "/home/nc/MEGA/BioPsychometrics/biomlatex/pca.tex"
+
+tikz(out_tex, width = 20, height = 20, standAlone = FALSE,engine = "xetex")
+print(p_all)
+
+dev.off()
+
+
+
+
+
+
+############################ Dynamic Predictions ##########################################
+source("dynpred.R")
+source("dynplots.R")
+
+dat2 = readRDS("dat2_with_hosp30g.rds")
+dat_pred <- dat2
+dat_pred$visit_m <- c(0, 6, 12)[dat_pred$visit_idx + 1L]
+
+
+
+itemnames <- c('Mobility','SelfCare','UsualActivities','PainorDiscomfort','Anxietyordepression',
+               'Gettingoutofbed','Puttingonsocks','Gettingupfromsitting','Bendingtowardthefloor_pickinguponobjectfromtheground','Twisting_pivotingontheinjuredknee','Kneeling','Squatting')
+
+q_map <- list(
+  QoL = c("Mobility","SelfCare","UsualActivities","PainorDiscomfort","Anxietyordepression"),
+  Mob = c("Gettingoutofbed","Puttingonsocks","Gettingupfromsitting","Bendingtowardthefloor_pickinguponobjectfromtheground","Twisting_pivotingontheinjuredknee","Kneeling","Squatting"))
+
+item_labels <- c(Mobility = "Mobility", SelfCare = "SelfCare", UsualActivities = "UsualAct", PainorDiscomfort = "PainDisc", Anxietyordepression = "AnxDepr",
+  Gettingoutofbed = "OutofBed", Puttingonsocks = "PutSocks", Gettingupfromsitting = "UpSit", Bendingtowardthefloor_pickinguponobjectfromtheground = "Bend",
+  Twisting_pivotingontheinjuredknee = "Twist", Kneeling = "Kneel", Squatting = "Squat")
+
+
+
+prep <- prep_long_all_items_surv_mixed2( dat = dat, ord_itemnames = itemnames, cont_itemnames = "Perceivedcurrenthealthstatus", cont_transforms = cont_tf, surv_outcome = "failure",  admin_date = "2025-01-01")
+
+long_dat <- prep$long
+K_by_item  <- prep$K_by_item
+
+outcome_info <- data.frame(item = c(itemnames,"Perceivedcurrenthealthstatus"), type = c(rep("ordinal", length(itemnames)),"continuous"), stringsAsFactors = FALSE)
+
+
+itemnames_ord <- c( "Mobility","SelfCare","UsualActivities","PainorDiscomfort","Anxietyordepression",
+  "Gettingoutofbed","Puttingonsocks","Gettingupfromsitting", "Bendingtowardthefloor_pickinguponobjectfromtheground",
+  "Twisting_pivotingontheinjuredknee","Kneeling","Squatting")
+
+
+theta_sampler_global <- make_theta_sampler_global(theta_mean = psi_adj_cov, V_theta = V_global)
+
+
+
+est_model <- strip_D_summaries_from_est(est_full_nocov)
+
+fit_fullplug_global <- make_fullplug_object(est = est_model,D = Dadj, K_map = K_map, ord_items = itemnames_ord, cont_items = "Perceivedcurrenthealthstatus",cont_scale = c(Perceivedcurrenthealthstatus = 100),
+  cont_transforms = cont_tf,
+  theta_sampler = theta_sampler_global,
+  covariate_transforms = list(
+    age = function(x) (as.numeric(x) - prep$age_center) / prep$age_scale
+  )
+)
+
+
+
+### new (fake) subjects
+
+fake1_id <- "FAKE1"
+fake2_id <- "FAKE2"
+fake3_id <- "FAKE3"
+
+times_m <- c(0, 6, 12)
+
+# longitudinal profiles
+Ymat1 <- rbind(
+  c(1,1,1,1,1, 1,1,1,1,1,1,1),
+  c(2,1,2,1,2, 2,3,3,2,2,1,1),
+  c(2,2,2,2,1, 1,2,4,2,3,1,1)
+)
+colnames(Ymat1) <- itemnames
+
+Ymat2 <- rbind(
+  c(2,1,2,1,1, 2,2,2,1,1,2,1),
+  c(2,3,2,2,2, 3,4,4,3,2,3,2),
+  c(2,3,3,2,2, 4,4,5,4,3,4,2)
+)
+colnames(Ymat2) <- itemnames
+
+Ymat3 <- rbind(
+  c(1,2,1,2,2, 2,3,2,3,1,2,1),
+  c(3,2,3,1,3, 3,3,4,3,2,2,3),
+  c(3,3,3,2,2, 5,4,4,5,3,5,5)
+)
+colnames(Ymat3) <- itemnames
+
+
+Ycont1 <- c(30, 40, 45)
+Ycont2 <- c(40, 60, 70)
+Ycont3 <- c(70, 80, 85)
+
+
+
+# covariates
+dat0_fake1 <- data.frame(
+  ID = fake1_id,
+  age = mean(long_dat$age, na.rm = TRUE),
+  sex01 = 0L,
+  diag_oa = 0L,
+  loghosp = mean(long_dat$loghosp, na.rm = TRUE),
+  prost_uni = 0L,
+  waiting = mean(long_dat$waiting, na.rm = TRUE)
+)
+
+dat0_fake2 <- data.frame(
+  ID = fake2_id,
+  age = mean(long_dat$age, na.rm = TRUE),
+  sex01 = 0L,
+  diag_oa = 0L,
+  loghosp = mean(long_dat$loghosp, na.rm = TRUE),
+  prost_uni = 0L,
+  waiting = mean(long_dat$waiting, na.rm = TRUE)
+)
+
+dat0_fake3 <- data.frame(
+  ID = fake3_id,
+  age = mean(long_dat$age, na.rm = TRUE),
+  sex01 = 0L,
+  diag_oa = 0L,
+  loghosp = mean(long_dat$loghosp, na.rm = TRUE),
+  prost_uni = 0L,
+  waiting = mean(long_dat$waiting, na.rm = TRUE)
+)
+
+# history construction
+hist_fake1_wide <- make_fake_hist_wide(
+  id = fake1_id,
+  ord_items = itemnames,
+  Y_ord = Ymat1,
+  covariates_row = dat0_fake1,
+  cont_name = "Perceivedcurrenthealthstatus",
+  Y_cont = Ycont1,
+  times = times_m,
+  times_in = "months"
+)
+
+hist_fake2_wide <- make_fake_hist_wide(
+  id = fake2_id,
+  ord_items = itemnames,
+  Y_ord = Ymat2,
+  covariates_row = dat0_fake2,
+  cont_name = "Perceivedcurrenthealthstatus",
+  Y_cont = Ycont2,
+  times = times_m,
+  times_in = "months"
+)
+
+hist_fake3_wide <- make_fake_hist_wide(
+  id = fake3_id,
+  ord_items = itemnames,
+  Y_ord = Ymat3,
+  covariates_row = dat0_fake3,
+  cont_name = "Perceivedcurrenthealthstatus",
+  Y_cont = Ycont3,
+  times = times_m,
+  times_in = "months"
+)
+
+
+newdata_fake <- dplyr::bind_rows(
+  hist_fake1_wide,
+  hist_fake2_wide,
+  hist_fake3_wide
+)
+
+######################## parallel computing for predictions ######################################
+library(parallel)
+library(doParallel)
+library(foreach)
+
+Sys.setenv(
+  OMP_NUM_THREADS = "1",
+  OPENBLAS_NUM_THREADS = "1",
+  MKL_NUM_THREADS = "1",
+  BLIS_NUM_THREADS = "1",
+  VECLIB_MAXIMUM_THREADS = "1",
+  NUMEXPR_NUM_THREADS = "1"
+)
+
+n_cores <- 9
+
+tasks <- data.frame(
+  label = c("dm1_0","dm1_6","dm1_12",
+            "dm2_0","dm2_6","dm2_12",
+            "dm3_0","dm3_6","dm3_12"),
+  obj_name = c("hist_fake1_wide","hist_fake1_wide","hist_fake1_wide",
+               "hist_fake2_wide","hist_fake2_wide","hist_fake2_wide",
+               "hist_fake3_wide","hist_fake3_wide","hist_fake3_wide"),
+  last_time = c(0,6,12, 0,6,12, 0,6,12),
+  seed = c(28963,28963,28963,
+           28543,28543,28543,
+           98043,98043,98043),
+  outfile = c("pred_fake1_0.rds","pred_fake1_6.rds","pred_fake1_12.rds",
+              "pred_fake2_0.rds","pred_fake2_6.rds","pred_fake2_12.rds",
+              "pred_fake3_0_hist.rds","pred_fake3_6_hist.rds","pred_fake3_12_hist.rds"),
+  stringsAsFactors = FALSE
+)
+
+cl <- makeCluster(n_cores, type = "PSOCK", outfile = "")
+
+clusterEvalQ(cl, {
+  Sys.setenv(
+    OMP_NUM_THREADS = "1",
+    OPENBLAS_NUM_THREADS = "1",
+    MKL_NUM_THREADS = "1",
+    BLIS_NUM_THREADS = "1",
+    VECLIB_MAXIMUM_THREADS = "1",
+    NUMEXPR_NUM_THREADS = "1"
+  )
+  setwd("~/dynpred")
+  library(Matrix)
+  library(MASS)
+  library(mvtnorm)
+  library(doParallel)
+  library(foreach)
+  source("dynpred.R")
+  NULL
+})
+
+clusterExport(cl, c(
+  "tasks",
+  "fit_fullplug_global",
+  "hist_fake1_wide",
+  "hist_fake2_wide",
+  "hist_fake3_wide"
+))
+
+registerDoParallel(cl)
+
+pred_summary <- foreach(i = 1:nrow(tasks),
+                        .combine = rbind,
+                        .errorhandling = "pass") %dopar% {
+  tt <- tasks[i, , drop = FALSE]
+  
+  hist_obj <- get(tt$obj_name)
+  
+  cat(tt$label, "\n")
+  
+  res <- tryCatch({
+    pred <- survfitJM_fullplug(
+      object = fit_fullplug_global,
+      newdata = hist_obj,
+      idVar = "ID",
+      timeVar = "visit_m",
+      survTimes = seq(0, 12 * 15, by = 1),
+      last.time = tt$last_time,
+      simulate = TRUE,
+      silent_fake_repair = TRUE,
+      repair_fake = FALSE,
+      theta_source = "global",
+      M = 1000,
+      scale = 1.6,
+      seed = tt$seed
+    )
+    
+    saveRDS(pred, tt$outfile)
+    
+    data.frame(
+      label = tt$label,
+      outfile = tt$outfile,
+      success_rate = mean(pred$success.rate, na.rm = TRUE),
+      ok = TRUE,
+      error = NA_character_,
+      stringsAsFactors = FALSE
+    )
+  }, error = function(e) {
+    data.frame(
+      label = tt$label,
+      outfile = tt$outfile,
+      success_rate = NA_real_,
+      ok = FALSE,
+      error = conditionMessage(e),
+      stringsAsFactors = FALSE
+    )
+  })
+  
+  res
+}
+
+stopCluster(cl)
+##################################################################################
+
+
+pred_fake1_0 = readRDS("pred_fake1_0.rds")
+pred_fake2_0 = readRDS("pred_fake2_0.rds")
+pred_fake3_0 = readRDS("pred_fake3_0_hist.rds")
+
+pred_fake1_6 = readRDS("pred_fake1_6.rds")
+pred_fake2_6 = readRDS("pred_fake2_6.rds")
+pred_fake3_6 = readRDS("pred_fake3_6_hist.rds")
+
+pred_fake1_12 = readRDS("pred_fake1_12.rds")
+pred_fake2_12 = readRDS("pred_fake2_12.rds")
+pred_fake3_12 = readRDS("pred_fake3_12_hist.rds")
+
+
+
+histories <- list(
+  FAKE1 = hist_fake1_wide,
+  FAKE2 = hist_fake2_wide,
+  FAKE3 = hist_fake3_wide
+)
+
+outs <- list(
+  FAKE1 = as_plot_out_from_fullplug(pred_fake1_12, id = "FAKE1"),
+  FAKE2 = as_plot_out_from_fullplug(pred_fake2_12, id = "FAKE2"),
+  FAKE3 = as_plot_out_from_fullplug(pred_fake3_12, id = "FAKE3")
+)
+
+titles <- c(
+  FAKE1 = "(a) poor profile",
+  FAKE2 = "(b) average profile",
+  FAKE3 = "(c) good profile"
+)
+
+
+t0_days <- 0
+t0_x <- 0
+
+q_map$Cont <- "Perceivedcurrenthealthstatus"
+
+item_labels <- c(
+  item_labels,
+  Perceivedcurrenthealthstatus = "Health"
+)
+
+
+
+outs_33 <- list(
+  FAKE1 = make_out_triplet_survfit(
+    pred0 = pred_fake1_0,
+    pred6 = pred_fake1_6,
+    pred12 = pred_fake1_12,
+    id = "FAKE1",
+    t_followup = c(0, 6, 12),
+    relative = "auto"
+  ),
+  FAKE2 = make_out_triplet_survfit(
+    pred0 = pred_fake2_0,
+    pred6 = pred_fake2_6,
+    pred12 = pred_fake2_12,
+    id = "FAKE2",
+    t_followup = c(0, 6, 12),
+    relative = "auto"
+  ),
+  FAKE3 = make_out_triplet_survfit(
+    pred0 = pred_fake3_0,
+    pred6 = pred_fake3_6,
+    pred12 = pred_fake3_12,
+    id = "FAKE3",
+    t_followup = c(0, 6, 12),
+    relative = "auto"
+  )
+)
+
+histories_33 <- histories[c("FAKE1","FAKE2", "FAKE3")]
+
+
+p_33 <- plot_3_subjects_3x3_compact(
+  outs = outs_33,
+  histories = histories_33,
+  ids = c("FAKE1","FAKE2", "FAKE3"),
+  q_map = q_map,
+  labels_map = item_labels,
+  row_titles = c("poor profile","average profile", "good profile"),
+  cond_labels = c("baseline", "6 months", "12 months"),
+  time_in = "months",
+  out_time_in = "months",
+  ci = "pointwise",
+  unit_out = "months",
+  horizon = 12 * 5,
+  pt_dodge = 0.6,
+  y_jitter = 0.05,
+  pt_size = 4.5,
+  pt_stroke = 1.1,
+  line_size = 1.2,
+  item_linetype = 1,
+  surv_size = 1.2,
+  surv_linetype = 1,
+  surv_ci_size = 0.9,
+  surv_ci_linetype = 2,
+  sep_size = 0.8,
+  sep_colour = "grey75",
+  sep_linetype = 1,
+  sep_extend_to = "cond",
+  sep_extend = 0,
+  cont_sep_pad = 0.15,
+  cond_vline_size = 0.8,
+  cond_vline_linetype = 3,
+  cond_vline_colour = "grey35",
+  cex = 2.3,
+  left_axis_title = "Item support",
+  cont_limits = c(0, 100),
+  cont_band = 0.85,
+  title_size = 14,
+  axis_title_size = 13,
+  axis_text_size = 12,
+  axis_line_size = 0.9,
+  axis_tick_size = 0.9,
+  panel_border_size = 0.9,
+  axis_ticks_length_pt = 7,
+  x_right_pad = 0,
+  x_left_pad = 0.05,
+  legend_height = 0.10,
+  legend_title_size = 28,
+  legend_text_size = 25,
+  legend_key_pt = 25,
+  
+  top_row_height = 1.20,
+  middle_row_height = 1.20,
+  bottom_row_height = 1.38,
+  legend_key_width_pt = 4,
+  legend_spacing_x_pt = 5,
+  legend_text_margin_left_pt = 5,
+  legend_text_margin_right_pt = 15,
+  
+  
+  question_col_width = 0.1,
+  panel_widths = c(1, 1, 1),
+  plot_margin_left_pt = 0.8,
+  plot_margin_right_title_pt = 1.0,
+  plot_margin_right_numbers_pt = 0.35,
+  plot_margin_right_none_pt = 0.1,
+  legend_nrow = 2,
+  legend_byrow = TRUE
+)
+
+tikzDevice::tikz("/home/nc/MEGA/BioPsychometrics/biomlatex/pred3x3.tex", width=25, height=18)
+print(p_33) 
+dev.off()
+
+
 
