@@ -197,7 +197,7 @@ res_wald <- wald_frailty_cov_suite(psi_global, se_global = se_global, V_global =
 res_wald$tests = res_wald$tests[,-2]
 kable(res_wald$tests,
       format = "latex", booktabs = TRUE,
-      caption = "Wald tests congiunti: H0 corr(item, frailty)=0",
+      caption = "Wald joint tests: H0 cov(item, frailty)=0",
       digits = c(0,3,0,3)) |>
   kable_styling(latex_options = c("hold_position"))
 
