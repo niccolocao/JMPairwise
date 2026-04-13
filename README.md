@@ -5,6 +5,7 @@ In particular, the code implements the pairwise-fitting estimation (Fieuws and V
     (i) the ordinal outcomes are modelled through a cumulative probit mixed model, 
     (ii) the continuous outcome by a Gaussian linear mixed model, 
     (iii) the time-to-event by a Weibull proportional hazards model with a univariate log-normal frailty. 
+    Note that the longitudinal outcomes have correlated errors across time points.
 
 The code uses GLMMadaptive package for estimation which can be downloaded for the used version by `remotes::install_github("drizopoulos/GLMMadaptive@36b1b26")`
 
