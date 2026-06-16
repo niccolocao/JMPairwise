@@ -1793,6 +1793,147 @@ update_est_interest_from_D <- function(est_interest, Dadj, Corradj = NULL,
 
 
 
+# Simultaneous Wald test for fixed effects equal at a given occasion
+                                  
+wald_same_fixed_effect_items <- function(psi, V,
+                                         items,
+                                         effect = "I6",
+                                         ref_item = items[1],
+                                         cont_item = "Perceivedcurrenthealthstatus",
+                                         sigma_param = NULL,
+                                         alpha = 0.05,
+                                         fdr_method = "fdr") {
+  stopifnot(is.numeric(psi), !is.null(names(psi)))
+  
+  V <- as.matrix(V)
+  if (is.null(rownames(V)) || is.null(colnames(V))) {
+    stop("V deve avere rownames e colnames")
+  }
+  
+  V <- V[names(psi), names(psi), drop = FALSE]
+  
+  if (!ref_item %in% items) {
+    stop("ref_item deve essere in items")
+  }
+  
+  if (is.null(sigma_param)) {
+    sigma_param <- paste0("log_sigma_", cont_item)
+  }
+  
+  psi_std <- psi
+  
+  J <- diag(length(psi))
+  dimnames(J) <- list(names(psi), names(psi))
+  
+  health_beta <- paste0("fixed_", cont_item, "_", effect)
+  
+  if (cont_item %in% items) {
+    if (!sigma_param %in% names(psi)) {
+      stop("parametro sigma mancante: ", sigma_param)
+    }
+    if (!health_beta %in% names(psi)) {
+      stop("fixed effect di Health mancante: ", health_beta)
+    }
+    
+    logsigma <- as.numeric(psi[[sigma_param]])
+    sigma <- exp(logsigma)
+    
+    beta <- as.numeric(psi[[health_beta]])
+    beta_std <- beta / sigma
+    
+    psi_std[[health_beta]] <- beta_std
+    
+    J[health_beta, ] <- 0
+    J[health_beta, health_beta] <- 1 / sigma
+    J[health_beta, sigma_param] <- -beta_std
+  } else {
+    sigma <- NA_real_
+  }
+  
+  V_std <- J %*% V %*% t(J)
+  V_std <- 0.5 * (V_std + t(V_std))
+  
+  items_test <- setdiff(items, ref_item)
+  
+  L <- matrix(
+    0,
+    nrow = length(items_test),
+    ncol = length(psi_std),
+    dimnames = list(
+      paste0("equal_", effect, "__", items_test, "_minus_", ref_item),
+      names(psi_std)
+    )
+  )
+  
+  for (i in seq_along(items_test)) {
+    it <- items_test[i]
+    
+    p_it <- paste0("fixed_", it, "_", effect)
+    p_ref <- paste0("fixed_", ref_item, "_", effect)
+    
+    if (!p_it %in% names(psi_std)) stop("parametro mancante: ", p_it)
+    if (!p_ref %in% names(psi_std)) stop("parametro mancante: ", p_ref)
+    
+    L[i, p_it] <- 1
+    L[i, p_ref] <- -1
+  }
+  
+  res <- wald_linear(
+    psi = psi_std,
+    L = L,
+    V = V_std
+  )
+  
+  se_contr <- sqrt(pmax(diag(res$V), 0))
+  z <- res$est / se_contr
+  p <- 2 * pnorm(-abs(z))
+  
+  contrasts <- data.frame(
+    contrast = names(res$est),
+    est = as.numeric(res$est),
+    se = as.numeric(se_contr),
+    z = as.numeric(z),
+    p = as.numeric(p),
+    p_fdr = p.adjust(p, method = fdr_method),
+    sig_0.05 = p < alpha,
+    sig_fdr_0.05 = p.adjust(p, method = fdr_method) < alpha,
+    stringsAsFactors = FALSE
+  )
+  
+  betas <- paste0("fixed_", items, "_", effect)
+  betas <- betas[betas %in% names(psi_std)]
+  
+  beta_table <- data.frame(
+    item = sub(paste0("^fixed_|_", effect, "$"), "", betas),
+    param = betas,
+    estimate = as.numeric(psi_std[betas]),
+    se = sqrt(pmax(diag(V_std)[betas], 0)),
+    stringsAsFactors = FALSE
+  )
+  
+  list(
+    global = data.frame(
+      test = paste0("H0: stesso effetto ", effect, " per tutti gli item"),
+      effect = effect,
+      ref_item = ref_item,
+      n_items = length(items),
+      df = res$df,
+      W = res$W,
+      p = res$p,
+      sig_0.05 = res$p < alpha,
+      stringsAsFactors = FALSE
+    ),
+    contrasts = contrasts,
+    betas = beta_table,
+    health_sigma = sigma,
+    psi_std = psi_std,
+    V_std = V_std,
+    L = L,
+    result = res
+  )
+}
+
+
 
 
 
