@@ -1926,5 +1926,99 @@ wald_shiftcov_frailty <- function(psi_global, V_global = NULL, se_global = NULL,
   )
 }
 
+
+
+
+
+# Standardizing the fixed effects of the continuous outcome
+                   
+standardize_cont_fixed_delta <- function(psi, V,
+                                         cont_item = "Perceivedcurrenthealthstatus",
+                                         fixed_terms = NULL,
+                                         sigma_param = NULL,
+                                         exclude_terms = "Intercept",
+                                         symmetrize = TRUE) {
+  stopifnot(is.numeric(psi), !is.null(names(psi)))
+  
+  V <- as.matrix(V)
+  stopifnot(identical(rownames(V), names(psi)))
+  stopifnot(identical(colnames(V), names(psi)))
+  
+  if (is.null(sigma_param)) {
+    sigma_param <- paste0("log_sigma_", cont_item)
+  }
+  
+  if (!sigma_param %in% names(psi)) {
+    stop("parametro sigma non trovato: ", sigma_param)
+  }
+  
+  fixed_prefix <- paste0("fixed_", cont_item, "_")
+  
+  if (is.null(fixed_terms)) {
+    beta_names <- grep(paste0("^", fixed_prefix), names(psi), value = TRUE)
+  } else {
+    beta_names <- paste0(fixed_prefix, fixed_terms)
+    beta_names <- intersect(beta_names, names(psi))
+  }
+  
+  if (length(exclude_terms)) {
+    beta_names <- setdiff(beta_names, paste0(fixed_prefix, exclude_terms))
+  }
+  
+  if (!length(beta_names)) {
+    stop("nessun fixed effect trovato per ", cont_item)
+  }
+  
+  logsig <- as.numeric(psi[[sigma_param]])
+  sigma <- exp(logsig)
+  
+  if (!is.finite(sigma) || sigma <= 0) {
+    stop("sigma non valida per ", cont_item)
+  }
+  
+  est_out <- psi
+  
+  J <- diag(length(psi))
+  dimnames(J) <- list(names(psi), names(psi))
+  
+  for (bn in beta_names) {
+    beta <- as.numeric(psi[[bn]])
+    
+    est_out[[bn]] <- beta / sigma
+    
+    J[bn, ] <- 0
+    J[bn, bn] <- 1 / sigma
+    J[bn, sigma_param] <- -beta / sigma
+  }
+  
+  V_out <- J %*% V %*% t(J)
+  if (isTRUE(symmetrize)) V_out <- 0.5 * (V_out + t(V_out))
+  
+  se_out <- sqrt(pmax(diag(V_out), 0))
+  
+  changed <- data.frame(
+    param = beta_names,
+    estimate_raw = as.numeric(psi[beta_names]),
+    se_raw = sqrt(pmax(diag(V)[beta_names], 0)),
+    estimate_std = as.numeric(est_out[beta_names]),
+    se_std = as.numeric(se_out[beta_names]),
+    sigma = sigma,
+    stringsAsFactors = FALSE
+  )
+  
+  list(
+    est = est_out,
+    V = V_out,
+    se = se_out,
+    changed = changed,
+    sigma = sigma,
+    beta_names = beta_names,
+    sigma_param = sigma_param
+  )
+}
+
+         
+
+
          
 
