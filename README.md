@@ -1,5 +1,5 @@
 # JMPairwise
-The R-scripts are related to the under-review article "Joint modeling of high-dimensional mixed-type longitudinal and survival data: An application to an orthopedic dataset with dynamic predictions",
+The R-scripts are related to the under-review article "Joint modeling of high-dimensional mixed-type longitudinal and survival data with dynamic predictions",
 
 In particular, the code implements the pairwise-fitting estimation (Fieuws and Verbeke, 2006) for joint modelling ordinal, continuous, and time-to-event outcomes with dynamic predictions: 
     (i) the ordinal outcomes are modelled through a cumulative probit mixed model, 
@@ -23,3 +23,5 @@ The code uses GLMMadaptive package for estimation which can be downloaded for th
  - genericUtilities.R: functions for Wald tests, tables, and plots
  - dynpred.R: functions for dynamic predictions
  - dynplot.R: functions for plotting dynamic predictions
+
+Fieuws, S. and Verbeke, G. (2006). Pairwise fitting of mixed models for the joint modelling of multivariate longitudinal profiles. _Biometrics_, *62*, 424--431.
