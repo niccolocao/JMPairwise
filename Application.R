@@ -140,15 +140,10 @@ est_full_nocov <- res_full$est
 V_full_nocov <- res_full$V
 se_full_nocov <- res_full$se
 
-# Alternative version:
-# keep the random-effects structure on the variance-covariance scale, but replace the D-related entries with the corrected SPD-adjusted values
-psi_adj_cov <- update_est_interest_from_D(
-  psi_global, Dadj, Corradj, representation = "cov"
-)
 
 
 
-######### Table for all fixed effects (longitudinal submodel ############################################
+######### Table for all fixed effects + Wald tests (longitudinal submodel) ############################################
 .default_base_order <- c(
   "Mobility", "SelfCare", "UsualActivities", "PainorDiscomfort", "Anxietyordepression","Perceivedcurrenthealthstatus",
   "Gettingoutofbed", "Puttingonsocks", "Gettingupfromsitting", "Bendingtowardthefloor_pickinguponobjectfromtheground",  "Twisting_pivotingontheinjuredknee",  "Kneeling", "Squatting",
@@ -156,29 +151,101 @@ psi_adj_cov <- update_est_interest_from_D(
 )
 item_order <- setdiff(.default_base_order, "frailty")
 
-tab_items3 <- make_wald_table_3cols_fdr(psi = psi_global,
-  se = se_global, est_corr = est_interest_adj, alpha = 0.05, predictors = c("I6","I12","wI6","wI12","pI6","pI12","diag_oa","sex01","loghosp_post","age"),
-  item_levels = item_order,  include_corr_frailty = TRUE, corr_levels = c("I0","Ipost"),  corr_prefix = "corrFrailty", fdr_method_fixed = "fdr", fdr_method_corr = "fdr")
+preds <- c("I6","I12","wI6","wI12","pI6","pI12","diag_oa","sex01","loghosp_post","age")
 
+std_health <- standardize_cont_fixed_delta(
+  psi = psi_global,
+  V = V_global,
+  cont_item = "Perceivedcurrenthealthstatus",
+  fixed_terms = preds
+)
+
+psi_global_comp <- std_health$est
+V_global_comp <- std_health$V
+se_global_comp <- std_health$se
+
+tab_items3 <- make_wald_table_3cols_fdr(
+  psi = psi_global_comp,
+  se = se_global_comp,
+  est_corr = est_interest_adj,
+  alpha = 0.05,
+  predictors = preds,
+  item_levels = item_order,
+  include_corr_frailty = TRUE,
+  corr_levels = c("I0", "Ipost"),
+  corr_prefix = "corrFrailty",
+  fdr_method_fixed = "fdr",
+  fdr_method_corr = "fdr"
+)
 
 item_map <- c(Mobility = "Mobility", SelfCare = "SelfCare",UsualActivities = "UsualAct", PainorDiscomfort = "PainDisc", Anxietyordepression = "AnxDepr",   
   Gettingoutofbed = "OutBed", Puttingonsocks = "PutSocks", Gettingupfromsitting = "UpSit", Bendingtowardthefloor_pickinguponobjectfromtheground="Bend", Twisting_pivotingontheinjuredknee = "Twist", Kneeling = "Kneel", Squatting = "Squat")
 
+latex_tab <- make_latex_beta_table_fdr(
+  tab_items3,
+  predictors = preds,
+  item_name_map = item_map,
+  alpha = 0.05,
+  digits_est = 3,
+  p_col_suffix = "p_fdr",
+  digits_se = 3,
+  caption = "Fixed effects by item with false discovery rate adjustment (Wald test; $^{*}$ p<0.05).",
+  label = "tab:fixed_items",
+  use_resizebox = TRUE
+)
 
-preds <- c("I6","I12","wI6","wI12","pI6","pI12","diag_oa","sex01","loghosp_post","age")
-
-latex_tab <- make_latex_beta_table(tab_items3,predictors = preds,item_name_map = item_map, alpha = 0.05, digits_est = 3,digits_se = 3, caption = "Fixed effects by item (Wald test; $^{*}$ p<0.05).",label   = "tab:fixed_items", use_resizebox = TRUE)
 cat(latex_tab)
 
+## Simultaneous Wald tests at 6 months 
+res_I6_equal_all <- wald_same_fixed_effect_items(
+  psi = psi_global,
+  V = V_global,
+  items = all_items,
+  effect = "I6",
+  ref_item = "Mobility"
+)
+res_I6_equal_all$global
+
+
+res_I12_equal_all <- wald_same_fixed_effect_items(
+  psi = psi_global,
+  V = V_global,
+  items = all_items,
+  effect = "I12",
+  ref_item = "Mobility"
+)
+res_I12_equal_all$global
+
+
+EQ_items <- c("Mobility","SelfCare","UsualActivities","PainorDiscomfort","Anxietyordepression","Perceivedcurrenthealthstatus")
+res_I6_equal_EQ <- wald_same_fixed_effect_items(
+  psi = psi_global,
+  V = V_global,
+  items = EQ_items,
+  effect = "I6",
+  ref_item = "Mobility"
+)
+res_I6_equal_EQ$global
+
+
+KOOS_items <- c("Gettingoutofbed","Puttingonsocks","Gettingupfromsitting","Bendingtowardthefloor_pickinguponobjectfromtheground","Twisting_pivotingontheinjuredknee","Kneeling","Squatting")
+res_I6_equal_KOOS <- wald_same_fixed_effect_items(
+  psi = psi_global,
+  V = V_global,
+  items = KOOS_items,
+  effect = "I6",
+  ref_item = "Gettingoutofbed"
+)
+res_I6_equal_KOOS$global
 
 
 
 
-#################################### Wald tests ########################################################
+#################################### Correlations between longitudinal and survival random effects - Wald tests ########################################################
 tab <- wald_table_raw(est_interest_adj, se_interest, add_fdr_corr = TRUE)
 tab_use = tab
 
-# Wald on fisher z for correlations Cor(b_ik1, s_i) and Cor(b_ik2, s_i)
+# Wald on fisher z for correlations for Cor(b_ik1, s_i) and Cor(b_ik2, s_i)
 corr_frail_nm <- names(est_interest_adj)[grepl("^corr_", names(est_interest_adj))&grepl("frailty", names(est_interest_adj))]
 corr_frail <- est_interest_adj[corr_frail_nm]
 se_frail   <- se_interest[corr_frail_nm]
@@ -187,7 +254,12 @@ tab_fisher <- wald_fisher_from_r(corr_frail, se_frail)
 
 
 
-################# Simultaneous Wald test on covariances  Cov(b_ik1, s_i) = Cov(b_ik2, s_i) = 0 for different subgroups of items
+#Wald on fisher z for correlations for Cor(b_ik2 - b_ik1, s_i) ###################
+tab_cd2 <- corrdiff_frailty_table_from_interest(est_interest_adj = est_interest_adj, V_interest = V_interest, sort_by = "p_fdr")
+tab_cd2
+
+
+################# Simultaneous Wald tests on covariances Cov(b_ik1, s_i) = Cov(b_ik2, s_i) = 0 for different subgroups of items
 EQ_items <- c("Mobility","SelfCare","UsualActivities","PainorDiscomfort","Anxietyordepression", "Perceivedcurrenthealthstatus")
 KOOS_items <- c("Gettingoutofbed","Gettingupfromsitting","Bendingtowardthefloor_pickinguponobjectfromtheground","Twisting_pivotingontheinjuredknee","Kneeling","Squatting","Puttingonsocks")
 
@@ -202,14 +274,7 @@ kable(res_wald$tests,
   kable_styling(latex_options = c("hold_position"))
 
 
-
-
-# Correlations Cor(b_ik2 - b_ik1, s_i)
-tab_cd2 <- corrdiff_frailty_table_from_interest(est_interest_adj = est_interest_adj, V_interest = V_interest, sort_by = "p_fdr")
-tab_cd2
-
-
-###### Simultaneous Wald test on covariances Cov(b_ik2 - b_ik1, s_i) = 0 
+########### Simultaneous Wald tests on covariances Cov(b_ik2 - b_ik1, s_i) = 0 for different subgroups of items
 EQ_items <- c("Mobility","SelfCare","UsualActivities","PainorDiscomfort","Anxietyordepression", "Perceivedcurrenthealthstatus")
 
 KOOS_items <- c("Gettingoutofbed","Gettingupfromsitting", "Bendingtowardthefloor_pickinguponobjectfromtheground","Twisting_pivotingontheinjuredknee","Kneeling","Squatting","Puttingonsocks")
