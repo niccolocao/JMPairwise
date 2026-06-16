@@ -1,4 +1,4 @@
-
+# JMPairwise
 The R-scripts are related to the under-review article "Joint modeling of high-dimensional mixed-type longitudinal and survival data with dynamic predictions".
 
 In particular, the code implements the pairwise-fitting estimation (Fieuws and Verbeke, 2006) for joint modelling ordinal, continuous, and time-to-event outcomes with dynamic predictions: 
